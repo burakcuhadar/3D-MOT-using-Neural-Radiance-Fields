@@ -18,6 +18,7 @@ class BaseDataset(Dataset):
         self.N_rand = args.N_rand
         self.use_viewdirs = args.use_viewdirs
         self.use_batching = not args.no_batching 
+        
 
         if self.split in ['test','render_video'] and args.render_factor!=0:
             # Render downsampled for speed
@@ -42,6 +43,9 @@ class BaseDataset(Dataset):
             self.rays_d = rays_d
             self.target_rgbs = target_rgbs
 
+            print('rays_o', self.rays_o.shape) 
+            print('rays_d', self.rays_d.shape) 
+            print('target_rgbs', self.target_rgbs.shape)
 
 
 
@@ -105,13 +109,29 @@ class BaseDataset(Dataset):
                 target = torch.Tensor(target) 
                 target = torch.reshape(target, [-1,3]) # (H*W, 3)
             else:
-                return rays_o, rays_d
-            
+                target = None
         
-        return rays_o, rays_d, target
 
+        if target is not None:
+            return rays_o, rays_d, target
+        else:
+            return rays_o, rays_d
 
-    
+    # used for debugging
+    def find_bounds(self):
+        farthest = self.rays_o + self.far * self.rays_d
+        norms = np.linalg.norm(farthest, axis=-1)
+        print('norms shape', norms.shape)
+        farthest_ind = np.argmax(norms)
+        print('farthest norm', norms[farthest_ind])
+        print('farthes coords', farthest[farthest_ind])
+        print('largest x', np.max(farthest[:,0]))
+        print('largest y', np.max(farthest[:,1]))
+        print('largest z', np.max(farthest[:,2]))
+        print('smallest x', np.min(farthest[:,0]))
+        print('smallest y', np.min(farthest[:,1]))
+        print('smallest z', np.min(farthest[:,2]))
+
 
     def collate_sample_pts_and_viewdirs(self, batch):
         """
@@ -142,7 +162,7 @@ class BaseDataset(Dataset):
             #viewdirs = torch.reshape(viewdirs, [-1,3]).float()
 
         if self.ndc:
-            # for forward facing scenes
+            # for forward facing scenes TODO remove ndc
             rays_o, rays_d = ndc_rays(self.H, self.W, self.K[0][0], 1., rays_o, rays_d)
 
         near, far = self.near * torch.ones_like(rays_d[...,:1]), self.far * torch.ones_like(rays_d[...,:1])
@@ -170,81 +190,11 @@ class BaseDataset(Dataset):
 
         return pts, viewdirs, z_vals, rays_o, rays_d, target
     
-    
+    @staticmethod
+    def validate_split(split):
+        splits = ['train', 'val', 'test', 'render_video'] 
+        assert split in splits, "Dataset split should be one of " + ", ".join(splits)
 
-    '''
-    def collate_sample_pts_and_viewdirs(self, batch):
-        """
-        Used in the dataloader as collate_fn to generate point samples along the rays and also view directions
-        Create sampled points and view directions using ray origins and directions
-        """
-        if self.split == 'render_video' and not self.render_test:
-            rays_o, rays_d = default_collate(batch)
-            target = None
-        else:
-            rays_o, rays_d, target = default_collate(batch)
-        
-        if (self.split == 'train' and not self.use_batching) or self.split in ['val', 'test', 'render_video']:
-            # Batch size is 1 in this case
-            rays_o = rays_o[0]
-            rays_d = rays_d[0]
-            if target is not None:
-                target = target[0]
-                
-        viewdirs = None
-        if self.use_viewdirs:
-            # provide ray directions as input
-            viewdirs = rays_d
-            viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True) # [N_rays, 3]
-            #viewdirs = torch.reshape(viewdirs, [-1,3]).float()
-
-        if self.ndc:
-            # for forward facing scenes
-            rays_o, rays_d = ndc_rays(self.H, self.W, self.K[0][0], 1., rays_o, rays_d)
-
-        near, far = self.near * torch.ones_like(rays_d[...,:1]), self.far * torch.ones_like(rays_d[...,:1])
-        
-
-        pts_chunks, z_vals_chunks = [], []
-        for i in range(0, rays_o.shape[0], self.chunk):
-            end_i = min(rays_o.shape[0], i + self.chunk)
-            N_rays_chunk = end_i - i
-            near_chunk = near[i:end_i, :]
-            far_chunk = far[i:end_i, :]
-            rays_o_chunk = rays_o[i:end_i, :]
-            rays_d_chunk = rays_d[i:end_i, :]
-
-            t_vals = torch.linspace(0., 1., steps=self.N_samples)
-            if not self.lindisp:
-                z_vals_chunk = near_chunk * (1.-t_vals) + far_chunk * (t_vals)
-            else:
-                z_vals_chunk = 1./(1./near_chunk * (1.-t_vals) + 1./far_chunk * (t_vals))
-
-            z_vals_chunk = z_vals_chunk.expand([N_rays_chunk, self.N_samples])
-
-            if self.split == 'train' and self.perturb > 0.:
-                # get intervals between samples
-                mids = .5 * (z_vals_chunk[...,1:] + z_vals_chunk[...,:-1])    
-                upper = torch.cat([mids, z_vals_chunk[...,-1:]], -1)
-                lower = torch.cat([z_vals_chunk[...,:1], mids], -1)
-                # stratified samples in those intervals
-                t_rand = torch.rand(z_vals_chunk.shape)
-                z_vals_chunk = lower + (upper - lower) * t_rand        
-
-            pts_chunk = rays_o_chunk[...,None,:] + rays_d_chunk[...,None,:] * z_vals_chunk[...,:,None] # N_rays_chunk, N_sample, 3
-
-            pts_chunks.append(pts_chunk)
-            z_vals_chunks.append(z_vals_chunk)
-
-        pts = torch.cat(pts_chunks, axis=0) # N_rays, N_samples, 3
-        z_vals = torch.cat(z_vals_chunks, axis=0) # N_rays, N_samples
-
-        return pts, viewdirs, z_vals, rays_o, rays_d, target
-        '''
-
-
-
-            
     @staticmethod
     def move_batch_to_device(batch, device):
         for i in range(len(batch)):

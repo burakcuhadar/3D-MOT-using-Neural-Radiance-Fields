@@ -39,8 +39,7 @@ def pose_spherical(theta, phi, radius):
 
 class BlenderDataset(BaseDataset):
     def __init__(self, args, split='train'):
-        splits = ['train', 'val', 'test', 'render_video'] 
-        assert split in splits, "Dataset split should be one of " + ", ".join(splits)
+        super().validate_split(split)
         self.split = split
 
         if split == 'render_video':

@@ -30,6 +30,8 @@ def train():
     parser = config_parser()
     args = parser.parse_args()
 
+    print('decay steps', args.lrate_decay_steps)
+
     # Create training dataset & loader 
     dataset_class = dataset_dict[args.dataset_type]
     train_dataset = dataset_class(args, split='train')
@@ -50,9 +52,11 @@ def train():
         num_workers=1,
         collate_fn=val_dataset.collate_sample_pts_and_viewdirs,
         pin_memory=True)
+    
+    logger_wandb = LoggerWandb(project_name=args.expname, args=args)
 
-    create_log_dir(args.basedir, args.expname)
-    copy_config_save_args(args.basedir, args.expname, args)
+    create_log_dir(args.basedir, args.expname + '_' + logger_wandb.run.id)
+    copy_config_save_args(args.basedir, args.expname + '_' + logger_wandb.run.id, args)
 
     #Create models
     model_coarse = NeRF(D=args.netdepth, W=args.netwidth, args=args)
@@ -80,7 +84,7 @@ def train():
 
     epochs = args.epochs
     
-    logger_wandb = LoggerWandb(project_name=args.expname, args=args)
+    
 
     print('use_batching', train_dataset.use_batching)
     print('number of batches', len(train_dataloader))
@@ -137,7 +141,7 @@ def train():
 
         # Save checkpoint
         if step % args.epoch_ckpt == 0:
-            path = os.path.join(args.basedir, args.expname, f'epoch_{step}.ckpt')
+            path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'epoch_{step}.ckpt')
             save_ckpt(path, model_coarse, model_fine, optimizer, scheduler, step)
             #print(f"Saved checkpoint for epoch {step}")
 

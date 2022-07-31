@@ -110,11 +110,18 @@ def config_parser():
     parser.add_argument("--raw_noise_std", type=float, default=0., 
                         help='std dev of noise added to regularize sigma_a output, 1e0 recommended')
 
-
+    parser.add_argument("--save_video_frames", action='store_true', 
+                        help='denotes whether frames of the rendered video will also be saved as png')
+    parser.add_argument("--no_test_set", action='store_true', 
+                        help='denotes whether the dataset has no test views')
     parser.add_argument("--render_test", action='store_true', 
                         help='render the test set instead of render_poses path')
     parser.add_argument("--render_factor", type=int, default=0, 
                         help='downsampling factor to speed up rendering, set 4 or 8 for fast preview')
+
+    
+    parser.add_argument("--scale_factor", type=float, default=-1,
+                        help='scaling factor for large scenes')
 
     # training options
     '''NOTE: precrop is not implemented
@@ -126,7 +133,7 @@ def config_parser():
 
     # dataset options
     parser.add_argument("--dataset_type", type=str, default='blender', 
-                        help='options: llff / blender / deepvoxels')
+                        help='options: llff / blender / deepvoxels / carla_static')
     parser.add_argument("--testskip", type=int, default=8, 
                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
     parser.add_argument("--num_workers", type=int, default=1,

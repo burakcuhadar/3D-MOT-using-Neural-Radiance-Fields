@@ -64,6 +64,7 @@ class NeRF(nn.Module):
         3. Estimate expected color integral
         """
         pts_flat = torch.reshape(pts, [-1, pts.shape[-1]]) # [N_rays*N_samples, 3]
+
         if viewdirs is not None:
             input_dirs = viewdirs[:,None].expand(pts.shape)
             input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]]) # [N_rays*N_samples, 3]
@@ -117,3 +118,4 @@ class NeRF(nn.Module):
             self.raw_noise_std if self.training else 0, self.white_bkgd)
         
         return rgb_map, disp_map, acc_map, weights, depth_map
+
