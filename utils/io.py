@@ -28,6 +28,10 @@ def load_ckpt(ckpt_path, model_coarse, model_fine, optimizer, scheduler):
     step_restored = ckpt['step']
     return step_restored
 
+def load_ckpt_appearance(ckpt_path, star_model, device):
+    ckpt = torch.load(ckpt_path, map_location=device) #TODO map location not required?
+    star_model.load_state_dict(ckpt['star_model'], strict=False) #TODO remove strict
+
 def load_ckpt_for_test(ckpt_path, model_coarse, model_fine):
     ckpt = torch.load(ckpt_path)
     model_coarse.load_state_dict(ckpt['model_coarse'])
@@ -45,6 +49,17 @@ def save_ckpt(path, model_coarse, model_fine, optimizer, scheduler, step):
     }, path)
     print('Saved checkpoints at', path)
 
+def save_ckpt_star(path, star_model, optimizer, scheduler, step):
+    torch.save({
+        'step': step,
+        'star_model': star_model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict()
+    }, path)
+    print('Saved checkpoints at', path)
+
+
+
 def config_parser():
 
     import configargparse
@@ -61,6 +76,10 @@ def config_parser():
     # training options
     parser.add_argument("--epochs", type=int, default=0,
                         help="number of epochs the model trained")
+    parser.add_argument("--epochs_appearance", type=int, default=0,
+                        help="maximum number of epochs for star appearance initialization")
+    parser.add_argument("--epochs_online", type=int, default=0,
+                        help="number of epochs for star online training")
     parser.add_argument("--netdepth", type=int, default=8, 
                         help='layers in network')
     parser.add_argument("--netwidth", type=int, default=256, 
@@ -73,9 +92,11 @@ def config_parser():
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument("--lrate_pose", type=float, default=5e-4, 
+                        help='learning rate for pose parameters')
 
     
-    parser.add_argument("--lrate_decay", type=int, default=500000, 
+    parser.add_argument("--lrate_decay", type=int, default=500, 
                         help='Period of learning rate decay in epochs')
     parser.add_argument("--lrate_decay_rate", type=float, default=0.1,
                         help='Learning rate decay rate')
@@ -91,6 +112,15 @@ def config_parser():
                         help='only take random rays from 1 image at a time')
     parser.add_argument("--ckpt_path", type=str, default=None, 
                         help='checkpoint file to load state')
+
+    # star training options
+    parser.add_argument("--skip_appearance_init", action='store_true',
+                        help='skip apperance initialization step')
+    parser.add_argument("--appearance_ckpt_path", type=str, default=None, 
+                        help='appearance init checkpoint file to load state')
+    parser.add_argument("--online_ckpt_path", type=str, default=None, 
+                        help='online training checkpoint file to load state') # TODO use this
+
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64, 
@@ -131,9 +161,19 @@ def config_parser():
                         default=.5, help='fraction of img taken for central crops') 
     '''
 
+    # star hyperparameters
+    parser.add_argument("--appearance_init_thres", type=float, default=2e-3, 
+                        help='threshold for loss to finish appearance initialization training (m1 in the paper)')
+    parser.add_argument("--online_thres", type=float, default=1e-3, 
+                        help='threshold for loss to finish online training (m2 in the paper)')
+    parser.add_argument("--initial_num_frames", type=int, default=5, 
+                        help='initial number of frames to start online training (k0 in the paper)')
+    parser.add_argument("--entropy_weight", type=float, default=2e-3, 
+                        help='entropy regularization weight (beta in the paper)')
+
     # dataset options
     parser.add_argument("--dataset_type", type=str, default='blender', 
-                        help='options: llff / blender / deepvoxels / carla_static')
+                        help='options: llff / blender / deepvoxels / carla_static / carla_star')
     parser.add_argument("--testskip", type=int, default=8, 
                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
     parser.add_argument("--num_workers", type=int, default=1,

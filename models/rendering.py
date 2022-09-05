@@ -92,7 +92,58 @@ def render(model_coarse, model_fine, pts, viewdirs, z_vals, rays_o, rays_d, retr
 
 
 
-def raw2outputs(raw_alpha, raw_rgb, z_vals, rays_d, raw_noise_std=0, white_bkgd=False):
+def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, retraw=True, N_importance=0, appearance_init=False): 
+    
+    if appearance_init:
+        rgb_map, disp_map, acc_map, weights, depth_map = star_model(pts, viewdirs, z_vals, rays_d, frames, 
+            is_coarse=True)
+    else:
+        rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
+            viewdirs, z_vals, rays_d, frames, is_coarse=True)
+
+    # Hierarchical volume sampling
+    if N_importance > 0:
+        rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
+        if not appearance_init:
+            rgb_map_static0, rgb_map_dynamic0, entropy0 = rgb_map_static, rgb_map_dynamic, entropy
+
+        z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(not star_model.training))
+        z_samples = z_samples.detach()
+        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+
+        pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
+
+        if appearance_init:
+            rgb_map, disp_map, acc_map, weights, depth_map = star_model(pts, viewdirs, z_vals, rays_d, frames, 
+                is_coarse=False)
+        else:
+            rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
+                viewdirs, z_vals, rays_d, frames, is_coarse=False)
+        
+    extras = {}
+    if not appearance_init:
+        extras['rgb_map_dynamic'] = rgb_map_dynamic
+        extras['rgb_map_static'] = rgb_map_static
+    if N_importance > 0:
+        extras['rgb0'] = rgb_map_0
+        extras['disp0'] = disp_map_0
+        extras['acc0'] = acc_map_0
+        extras['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
+        if not appearance_init:
+            extras['rgb_map_static0'] = rgb_map_static0
+            extras['rgb_map_dynamic0'] = rgb_map_dynamic0
+            extras['entropy0'] = entropy0
+
+    if appearance_init:
+        return rgb_map, disp_map, acc_map, extras
+    else:
+        return rgb_map, disp_map, acc_map, extras, entropy
+    
+
+
+
+def raw2outputs(raw_alpha, raw_rgb, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, ret_entropy=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw_alpha: [num_rays, num_samples along ray]. Raw volume density predicted by the model.
@@ -130,10 +181,76 @@ def raw2outputs(raw_alpha, raw_rgb, z_vals, rays_d, raw_noise_std=0, white_bkgd=
     if white_bkgd:
         rgb_map = rgb_map + (1.-acc_map[...,None])
 
+    if ret_entropy: # TODO I think in the paper they dont use regularization for appearance init. But it may still be helpful, do experiments.
+        entropy = compute_entropy(alpha)
+        return rgb_map, disp_map, acc_map, weights, depth_map, entropy 
+
     return rgb_map, disp_map, acc_map, weights, depth_map
 
 
+def raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rgb_dynamic, z_vals, rays_d, 
+    raw_noise_std=0, white_bkgd=False, ret_entropy=False):
+    
+    raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
 
+    dists = z_vals[...,1:] - z_vals[...,:-1]
+    dists = torch.cat([dists, torch.tensor([1e10], device=device).expand(dists[...,:1].shape)], -1) #[N_rays,N_samples]
+
+    dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
+
+    rgb_static = torch.sigmoid(raw_rgb_static)  # [N_rays, N_samples, 3]
+    rgb_dynamic = torch.sigmoid(raw_rgb_dynamic)  # [N_rays, N_samples, 3]
+    
+    noise = 0.
+    if raw_noise_std > 0.:
+        noise = torch.randn(raw_alpha_static.shape) * raw_noise_std
+
+    alpha_static = raw2alpha(raw_alpha_static + noise, dists)  # [N_rays, N_samples]
+    alpha_dynamic = raw2alpha(raw_alpha_dynamic + noise, dists)  # [N_rays, N_samples]
+    alpha_total = raw2alpha(raw_alpha_static + noise + raw_alpha_dynamic + noise, dists)
+
+    #T_s = torch.cumprod(torch.cat([torch.ones((alpha_static.shape[0], 1), device=device), 1.-alpha_static + 1e-10], -1), -1)[:, :-1]
+    #T_d = torch.cumprod(torch.cat([torch.ones((alpha_dynamic.shape[0], 1), device=device), 1.-alpha_dynamic + 1e-10], -1), -1)[:, :-1]
+    #T = T_s * T_d 
+    T = torch.cumprod(torch.cat([torch.ones((alpha_total.shape[0], 1), device=device), 1.-alpha_total + 1e-10], -1), -1)[:, :-1]
+    rgb_map_static = torch.sum(T[...,None] * alpha_static[...,None] * rgb_static, dim=-2)
+    rgb_map_dynamic = torch.sum(T[...,None] * alpha_dynamic[...,None] * rgb_dynamic, dim=-2)
+    #rgb_map = torch.sum(T[...,None] * (alpha_static[...,None] * rgb_static + alpha_dynamic[...,None] * rgb_dynamic), dim=-2)
+    rgb_map = rgb_map_static + rgb_map_dynamic
+
+    #weights = torch.sum(T[...,None] * (alpha_static[...,None] + alpha_dynamic[...,None]), dim=-2)
+    weights = T * alpha_total # [N_rays, N_samples]
+    depth_map = torch.sum(weights * z_vals, -1)
+    disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
+    acc_map = torch.sum(weights, -1)
+    
+    if white_bkgd:
+        rgb_map = rgb_map + (1.-acc_map[...,None])
+
+    if ret_entropy:
+        entropy = compute_entropy(alpha_static, alpha_dynamic)
+        return rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic
+
+    return rgb_map, disp_map, acc_map, weights, depth_map, rgb_map_static, rgb_map_dynamic
+
+
+def compute_entropy(alpha_static, alpha_dynamic=None):
+    entropy = -torch.sum(alpha_static * torch.log(alpha_static + 1e-10) + (1 - alpha_static) * torch.log(1 - alpha_static + 1e-10))
+    
+    if alpha_dynamic is None:
+        return entropy
+    entropy += -torch.sum(alpha_dynamic * torch.log(alpha_dynamic + 1e-10) + (1 - alpha_dynamic) * torch.log(1 - alpha_dynamic + 1e-10))
+    
+
+    '''
+    total_alpha = alpha_static + alpha_dynamic
+    static_normed_trans = alpha_static / (total_alpha + 1e-10)
+    dynamic_normed_trans = alpha_dynamic / (total_alpha + 1e-10)
+    entropy += torch.sum(total_alpha * (static_normed_trans * torch.log(static_normed_trans + 1e-10) + \
+        dynamic_normed_trans * torch.log(dynamic_normed_trans + 1e-10)))
+    '''
+
+    return entropy
 
 # Hierarchical sampling (section 5.2)
 def sample_pdf(bins, weights, N_samples, det=False):

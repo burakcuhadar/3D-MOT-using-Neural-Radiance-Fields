@@ -5,7 +5,7 @@ import imageio
 import torch
 import re
 
-from datasets.base import BaseDataset
+from datasets.base_star import BaseStarDataset
 
 
 # Translation in UE4
@@ -69,18 +69,20 @@ def from_ue4_to_nerf(pose):
 
 
 
-class CarlaStaticDataset(BaseDataset):
-    def __init__(self, args, split='train'):
+class CarlaStarDataset(BaseStarDataset):
+    def __init__(self, args, split, num_frames):
         super().validate_split(split)
         self.split = split
+        self.num_frames = num_frames
 
-        if split == 'render_video':
+        if split == 'render_video': # TODO
             # Render video using evenly spaced views
             poses = np.stack([pose_spherical(angle, 20.0) for angle in np.linspace(-180,180,40+1)[:-1]], axis=0)
             imgs = None
         else:
-            imgs, poses = self.load_imgs_poses(args, split)
+            imgs, poses, frames = self.load_imgs_poses(args, split)
 
+        
         H, W, focal = self.load_intrinsics(args)
         self.H = int(H)
         self.W = int(W)
@@ -88,6 +90,7 @@ class CarlaStaticDataset(BaseDataset):
         
         self.imgs = imgs
         self.poses = poses
+        self.frames = frames
         self.near = 6. 
         self.far = 100.
         print('near', self.near)
@@ -115,31 +118,62 @@ class CarlaStaticDataset(BaseDataset):
         focal = W / (2 * np.tan(fov * np.pi / 360))
 
         return H, W, focal
-
+    
+    def get_gt_vehicle_poses(self, args):
+        pose_files = sorted(glob(args.datadir + '/poses/*.npy'), key=natural_keys)
+        poses = []
+        pose0 = None
+        for i, f in enumerate(pose_files):
+            if i == 0:
+                pose0 = from_ue4_to_nerf(np.load(f))
+                poses.append(np.eye(4, dtype=np.float32))
+            else:
+                posei = from_ue4_to_nerf(np.load(f))
+                posei_inv = np.eye(4, dtype=np.float32)
+                posei_inv[:3,:3] = posei[:3,:3].T
+                posei_inv[:3,-1] = -posei[:3,:3].T @ posei[:3,-1]
+                pose = pose0 @ posei_inv
+                poses.append(pose.astype(np.float32))
+        poses = np.stack(poses, axis=0)
+        poses = torch.from_numpy(poses)
+        return poses
 
     def load_imgs_poses(self, args, split):
         extrinsics = np.load(os.path.join(args.datadir, 'extrinsics.npy'), allow_pickle=True).item()
+
         cameras = sorted(glob(args.datadir + '/camera*/'), key=natural_keys)
 
         imgs = []
         poses = []
         
         for i, cam in enumerate(cameras):
-            if self.split == 'train' and i >=50:
-                continue
-            elif self.split == 'val' and i < 50:
-                continue
+            if self.split == 'train_appearance' or self.split == 'train_online':
+                if i >= 50:
+                    continue
+            elif self.split == 'val_appearance' or self.split == 'val_online':
+                if i < 50:
+                    continue
             print(cam, 'goes to', self.split)
-            print(cam, ' extrinsics:', extrinsics[i])
+            #print(cam, ' extrinsics:', extrinsics[i])
 
-            imgpath = glob(cam + '*.png')[0] # Only one image per dir
-            imgs.append(imageio.imread(imgpath))
+            imgpaths = sorted(glob(cam + '*.png'), key=natural_keys)[:self.num_frames]
+            # if self.split == 'train_appearance' or self.split == 'val_appearance':  
+            #     # The first frame is used for appearance init
+            #     imgpaths = imgpaths[:1]
+            imgs.append([imageio.imread(imgpath) for imgpath in imgpaths])
             poses.append(from_ue4_to_nerf(extrinsics[i]))
 
-        imgs = (np.array(imgs) / 255.).astype(np.float32)[...,:3]
-        poses = np.array(poses).astype(np.float32)
+        imgs = (np.array(imgs) / 255.).astype(np.float32)[...,:3] # [view_num, frame_num, H, W, 3]
+        poses = np.array(poses).astype(np.float32) # [view_num, 4, 4]
+        frames = None
 
-        return imgs, poses
+        if self.split == 'train_appearance' or self.split == 'val_appearance':
+            imgs = np.squeeze(imgs, axis=1)
+        else:
+            frames = np.arange(imgs.shape[1])[None,:].repeat(imgs.shape[0], axis=0) # [view_num, frame_num]
+
+
+        return imgs, poses, frames
         
 
 

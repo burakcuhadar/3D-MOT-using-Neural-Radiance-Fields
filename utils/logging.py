@@ -8,14 +8,22 @@ class LoggerWandb():
         self.is_importance = args.N_importance > 0
 
 
-
+    # For vanilla NeRF
     def log_train(self, epoch, loss, psnr, psnr0=None):
-        #TODO tf.contrib.summary.histogram('tran', trans)
         if self.is_importance:
             self.run.log({"loss": loss, "psnr": psnr, "psnr0": psnr0, "epoch": epoch})
         else:
             self.run.log({"loss": loss, "psnr": psnr, "epoch": epoch})
 
+    # For Star, appearance init
+    def log_train_appearance(self, epoch, loss, psnr, psnr0=None):
+        self.run.log({"loss appearance": loss, "psnr appearance": psnr, "psnr0 appearance": psnr0, "epoch": epoch})
+
+    # For Star, online training
+    def log_train_online(self, epoch, loss, psnr, psnr0=None):
+        self.run.log({"fine loss online": loss, "psnr online": psnr, "psnr0 online": psnr0, "epoch": epoch})
+
+    # For vanilla NeRF
     def log_val(self, epoch, loss, psnr, rgb, gt_rgb, disp, acc, rgb0=None, disp0=None, z_std=None):
         # Create val table
         columns = ["epoch", "rgb", "gt rgb", "disp", "acc"]
@@ -33,6 +41,34 @@ class LoggerWandb():
         self.run.log({"val table": val_table, "epoch": epoch})
 
 
+    # For Star, appearance init
+    def log_val_appearance(self, epoch, loss, psnr, rgb, gt_rgb, disp, acc, rgb0=None, disp0=None, z_std=None):
+        # Create val table
+        columns = ["epoch", "rgb", "gt rgb", "disp", "acc", "rgb_coarse", "disp_coarse", "z_std"]
+        val_table = wandb.Table(columns=columns)
+
+        val_table.add_data(epoch, wandb.Image(rgb), wandb.Image(gt_rgb), wandb.Image(disp), wandb.Image(acc), 
+            wandb.Image(rgb0), wandb.Image(disp0), wandb.Image(z_std))
+    
+        self.run.log({"val appearance loss": loss, "val appearance psnr": psnr, "epoch": epoch})
+        self.run.log({"val appearance table": val_table, "epoch": epoch})
+
+    # For Star, online training
+    def log_val_online(self, epoch, loss, psnr, rgb, gt_rgb, rgb_static, rgb_dynamic, disp, acc, rgb0=None, rgb_static0=None, rgb_dynamic0=None, disp0=None, z_std=None):
+        # Create val table
+        columns = ["epoch", "rgb", "gt rgb", "rgb static", "rgb dynamic", "disp", "acc", "rgb_coarse", "rgb static coarse", "rgb dynamic coarse", "disp_coarse", "z_std"]
+        val_table = wandb.Table(columns=columns)
+
+        val_table.add_data(epoch, wandb.Image(rgb), wandb.Image(gt_rgb), wandb.Image(rgb_static), 
+            wandb.Image(rgb_dynamic), wandb.Image(disp), wandb.Image(acc), wandb.Image(rgb0), wandb.Image(rgb_static0), 
+            wandb.Image(rgb_dynamic0), wandb.Image(disp0), wandb.Image(z_std))
+    
+        self.run.log({"val online loss": loss, "val online psnr": psnr, "epoch": epoch})
+        self.run.log({"val online table": val_table, "epoch": epoch})
+
+
+
+    # For vanilla NeRF
     def log_test(self, loss, psnr, rgbs, disps):
         self.run.log({"test loss": loss, "test psnr": psnr})
         columns = [f'rgb{i}' for i in range(len(rgbs))]
@@ -41,6 +77,7 @@ class LoggerWandb():
         test_table.add_data(*rgbs, *disps)
         self.run.log({"test table": test_table})
 
+    # For vanilla NeRF
     def log_video(self, rgb_path, disp_path):
         # Create video table
         columns = ["rgb", "disp"]

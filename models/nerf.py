@@ -57,7 +57,15 @@ class NeRF(nn.Module):
         self.raw_noise_std = args.raw_noise_std # should only be used for training
         self.white_bkgd = args.white_bkgd
 
-    def forward(self, pts, viewdirs, z_vals, rays_d):
+        # Weight Initialization
+        for layer in self.pts_linears:
+            torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
+            torch.nn.init.zeros_(layer.bias)
+        for layer in self.views_linears:
+            torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
+            torch.nn.init.zeros_(layer.bias)
+
+    def forward(self, pts, viewdirs, z_vals=None, rays_d=None):
         """
         1. Embed the input points and view directions if given
         2. Forward pass embedded inputs through MLP to get rgb and density
@@ -113,9 +121,13 @@ class NeRF(nn.Module):
         raw_rgb = torch.reshape(raw_rgb, pts.shape) # N_rays, N_samples, 3
         raw_alpha = torch.reshape(raw_alpha, pts.shape[:-1]) # N_rays, N_samples
 
+        if z_vals is None:
+            return raw_alpha, raw_rgb
+
         # 3. Estimate expected color integral and return extras
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw_alpha, raw_rgb, z_vals, rays_d, 
             self.raw_noise_std if self.training else 0, self.white_bkgd)
         
         return rgb_map, disp_map, acc_map, weights, depth_map
 
+    

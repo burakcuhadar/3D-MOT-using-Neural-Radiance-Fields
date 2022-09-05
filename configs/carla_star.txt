@@ -1,0 +1,54 @@
+expname = carla_star
+basedir = ./logs
+datadir = ./data/carla_dynamic
+dataset_type = carla_star
+
+# to load appearance init ckpt
+skip_appearance_init = True
+appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_234npayx/appearance_epoch_7.ckpt
+
+# to train appearnace init
+#skip_appearance_init = False
+
+
+use_viewdirs = True
+
+lrate = 5e-4
+lrate_pose = 5e-4
+#lrate_decay_steps = [15, 35, 55, 75, 300]
+lrate_decay = 500
+lrate_decay_rate = 0.5
+
+netdepth = 12
+netdepth_fine = 12
+netchunk = 16384
+
+scale_factor = 0.2
+
+N_samples = 256
+N_importance = 256
+N_rand = 512
+
+num_workers = 2
+
+#no_batching = False
+#epochs_appearance = 64
+#epochs_online = 128
+#epoch_ckpt = 1
+#epoch_print = 1
+#epoch_val = 1
+
+no_batching = True
+epochs_appearance = 5000
+epochs_online = 50000
+epoch_ckpt = 5
+epoch_print = 5
+epoch_val = 5
+
+appearance_init_thres = 2e-3
+online_thres = 1e-3
+initial_num_frames = 5
+entropy_weight = 2e-3
+
+no_test_set = True
+save_video_frames = False

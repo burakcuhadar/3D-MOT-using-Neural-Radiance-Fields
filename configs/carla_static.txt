@@ -16,11 +16,11 @@ netchunk = 16384
 
 scale_factor = 0.2
 
-N_samples = 256
+N_samples = 128
 N_importance = 256
-N_rand = 1024
+N_rand = 2048
 
-num_workers = 4
+num_workers = 2
 
 no_batching = False
 epochs = 64
@@ -28,5 +28,13 @@ epoch_ckpt = 1
 epoch_print = 1
 epoch_val = 1
 
+#no_batching = True
+#epochs = 5000
+#epoch_ckpt = 10
+#epoch_print = 5
+#epoch_val = 5
+
+
+
 no_test_set = True
-save_video_frames = True
+save_video_frames = False

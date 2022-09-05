@@ -30,6 +30,8 @@ def train():
     parser = config_parser()
     args = parser.parse_args()
 
+    logger_wandb = LoggerWandb(project_name=args.expname, args=args)
+
     print('decay steps', args.lrate_decay_steps)
 
     # Create training dataset & loader 
@@ -53,8 +55,6 @@ def train():
         collate_fn=val_dataset.collate_sample_pts_and_viewdirs,
         pin_memory=True)
     
-    logger_wandb = LoggerWandb(project_name=args.expname, args=args)
-
     create_log_dir(args.basedir, args.expname + '_' + logger_wandb.run.id)
     copy_config_save_args(args.basedir, args.expname + '_' + logger_wandb.run.id, args)
 
