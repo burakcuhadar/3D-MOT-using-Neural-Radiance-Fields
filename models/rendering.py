@@ -92,14 +92,15 @@ def render(model_coarse, model_fine, pts, viewdirs, z_vals, rays_o, rays_d, retr
 
 
 
-def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, retraw=True, N_importance=0, appearance_init=False): 
+def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, retraw=True, N_importance=0, 
+    appearance_init=False, object_pose=None): 
     
     if appearance_init:
         rgb_map, disp_map, acc_map, weights, depth_map = star_model(pts, viewdirs, z_vals, rays_d, frames, 
             is_coarse=True)
     else:
         rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
-            viewdirs, z_vals, rays_d, frames, is_coarse=True)
+            viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose)
 
     # Hierarchical volume sampling
     if N_importance > 0:
@@ -119,7 +120,7 @@ def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
                 is_coarse=False)
         else:
             rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
-                viewdirs, z_vals, rays_d, frames, is_coarse=False)
+                viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose)
         
     extras = {}
     if not appearance_init:
@@ -209,17 +210,21 @@ def raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rg
     alpha_dynamic = raw2alpha(raw_alpha_dynamic + noise, dists)  # [N_rays, N_samples]
     alpha_total = raw2alpha(raw_alpha_static + noise + raw_alpha_dynamic + noise, dists)
 
-    #T_s = torch.cumprod(torch.cat([torch.ones((alpha_static.shape[0], 1), device=device), 1.-alpha_static + 1e-10], -1), -1)[:, :-1]
-    #T_d = torch.cumprod(torch.cat([torch.ones((alpha_dynamic.shape[0], 1), device=device), 1.-alpha_dynamic + 1e-10], -1), -1)[:, :-1]
+    T_s = torch.cumprod(torch.cat([torch.ones((alpha_static.shape[0], 1), device=device), 1.-alpha_static + 1e-10], -1), -1)[:, :-1]
+    T_d = torch.cumprod(torch.cat([torch.ones((alpha_dynamic.shape[0], 1), device=device), 1.-alpha_dynamic + 1e-10], -1), -1)[:, :-1]
     #T = T_s * T_d 
     T = torch.cumprod(torch.cat([torch.ones((alpha_total.shape[0], 1), device=device), 1.-alpha_total + 1e-10], -1), -1)[:, :-1]
-    rgb_map_static = torch.sum(T[...,None] * alpha_static[...,None] * rgb_static, dim=-2)
-    rgb_map_dynamic = torch.sum(T[...,None] * alpha_dynamic[...,None] * rgb_dynamic, dim=-2)
-    #rgb_map = torch.sum(T[...,None] * (alpha_static[...,None] * rgb_static + alpha_dynamic[...,None] * rgb_dynamic), dim=-2)
-    rgb_map = rgb_map_static + rgb_map_dynamic
+    rgb_map = torch.sum(T[...,None] * (alpha_static[...,None] * rgb_static + alpha_dynamic[...,None] * rgb_dynamic), dim=-2)
+    
+    
+    # Only for visualization
+    rgb_map_static = torch.sum(T_s[...,None] * alpha_static[...,None] * rgb_static, dim=-2)
+    rgb_map_dynamic = torch.sum(T_d[...,None] * alpha_dynamic[...,None] * rgb_dynamic, dim=-2)
 
-    #weights = torch.sum(T[...,None] * (alpha_static[...,None] + alpha_dynamic[...,None]), dim=-2)
-    weights = T * alpha_total # [N_rays, N_samples]
+    #weights = T * (alpha_static + alpha_dynamic)
+    #weights = T * alpha_total # [N_rays, N_samples]
+    weights = T_s * T_d * alpha_total
+
     depth_map = torch.sum(weights * z_vals, -1)
     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
     acc_map = torch.sum(weights, -1)
@@ -235,22 +240,27 @@ def raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rg
 
 
 def compute_entropy(alpha_static, alpha_dynamic=None):
-    entropy = -torch.sum(alpha_static * torch.log(alpha_static + 1e-10) + (1 - alpha_static) * torch.log(1 - alpha_static + 1e-10))
     
-    if alpha_dynamic is None:
-        return entropy
-    entropy += -torch.sum(alpha_dynamic * torch.log(alpha_dynamic + 1e-10) + (1 - alpha_dynamic) * torch.log(1 - alpha_dynamic + 1e-10))
+    eps = torch.finfo(alpha_static.dtype).eps
+    alpha_static_clamp = alpha_static.clamp(min=eps, max=1-eps)
+    alpha_dynamic_clamp = alpha_dynamic.clamp(min=eps, max=1-eps)
+    
+    entropy = -torch.mean(alpha_static * torch.log(alpha_static_clamp) + (1 - alpha_static) * torch.log1p(-alpha_static_clamp))
+    entropy += -torch.mean(alpha_dynamic * torch.log(alpha_dynamic_clamp) + (1 - alpha_dynamic) * torch.log1p(-alpha_dynamic_clamp))
     
 
-    '''
     total_alpha = alpha_static + alpha_dynamic
-    static_normed_trans = alpha_static / (total_alpha + 1e-10)
-    dynamic_normed_trans = alpha_dynamic / (total_alpha + 1e-10)
-    entropy += torch.sum(total_alpha * (static_normed_trans * torch.log(static_normed_trans + 1e-10) + \
-        dynamic_normed_trans * torch.log(dynamic_normed_trans + 1e-10)))
-    '''
+    static_normed_trans = alpha_static / total_alpha.clamp(min=eps)
+    static_normed_trans_clamp = static_normed_trans.clamp(min=eps)
+    dynamic_normed_trans = alpha_dynamic / total_alpha.clamp(min=eps)
+    dynamic_normed_trans_clamp = dynamic_normed_trans.clamp(min=eps)
 
+    #TODO entropy += ...
+    entropy += -torch.mean(total_alpha * (static_normed_trans * static_normed_trans_clamp.log() + \
+        dynamic_normed_trans * dynamic_normed_trans_clamp.log()))
+    
     return entropy
+    
 
 # Hierarchical sampling (section 5.2)
 def sample_pdf(bins, weights, N_samples, det=False):
@@ -334,5 +344,48 @@ def render_path(render_dataloader, model_coarse, model_fine, N_importance, devic
     return rgbs, disps, test_loss, test_psnr
 
 
+def render_path_star(render_dataloader, star_model, N_importance, device, savedir=None):
+    rgbs = []
+    disps = []
+    rgb_statics0 = []
+    rgb_dynamics0 = []
+    rgb_statics = []
+    rgb_dynamics = []
 
+    H = render_dataloader.dataset.H
+    W = render_dataloader.dataset.W
+    
+    with torch.no_grad():
+        for i, batch in tenumerate(render_dataloader):
+            render_dataloader.dataset.move_batch_to_device(batch, device)
+            pts, viewdirs, z_vals, rays_o, rays_d, object_pose = batch
+
+            rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
+                retraw=True, N_importance=N_importance, object_pose=object_pose)
+            
+            rgbs.append(to8b(rgb.cpu().detach().numpy().reshape((H, W, 3))))
+            disps.append(disp.cpu().detach().numpy().reshape((H, W, 1)))
+            rgb_statics0.append(to8b(extras['rgb_map_static0'].cpu().detach().numpy().reshape((H, W, 3))))
+            rgb_dynamics0.append(to8b(extras['rgb_map_dynamic0'].cpu().detach().numpy().reshape((H, W, 3))))
+            rgb_statics.append(to8b(extras['rgb_map_static'].cpu().detach().numpy().reshape((H, W, 3))))
+            rgb_dynamics.append(to8b(extras['rgb_map_dynamic'].cpu().detach().numpy().reshape((H, W, 3))))
+
+            if savedir is not None:
+                filename = os.path.join(savedir, '{:03d}.png'.format(i))
+                imageio.imwrite(filename, rgbs[-1])
+                filename = os.path.join(savedir, '{:03d}_static.png'.format(i))
+                imageio.imwrite(filename, rgb_statics[-1])
+                filename = os.path.join(savedir, '{:03d}_dynamic.png'.format(i))
+                imageio.imwrite(filename, rgb_dynamics[-1])
+    
+    rgbs = np.stack(rgbs, 0)
+    disps = np.stack(disps, 0)
+    disps = to8b(disps)
+    rgb_statics0 = np.stack(rgb_statics0, 0)
+    rgb_statics = np.stack(rgb_statics, 0)
+    rgb_dynamics0 = np.stack(rgb_dynamics0, 0)
+    rgb_dynamics = np.stack(rgb_dynamics, 0)
+
+    return rgbs, disps, rgb_statics0, rgb_dynamics0, rgb_statics, rgb_dynamics
+    
 

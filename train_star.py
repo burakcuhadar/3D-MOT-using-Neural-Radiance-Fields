@@ -181,6 +181,24 @@ def train_online(star_model, args, logger_wandb):
 
     k = args.initial_num_frames
 
+    # Create optimizer
+    optimizer = torch.optim.Adam([
+        {'params': star_model.poses_, 'lr': args.lrate_pose}, 
+        {'params': star_model.get_nerf_params()}
+    ], lr=args.lrate, betas=(0.9, 0.999))
+
+    scheduler = LambdaLR(optimizer, lr_lambda=get_scheduler_online(args))
+
+
+    # Load checkpoint for online training
+    step_restored = 0
+    if args.online_ckpt_path is not None:
+        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
+        print("Resuming online training from step:", step_restored)
+    else:
+        print("No checkpoint given for online training, starting from scratch")
+
+    
     # Create training dataset/loader for online training  
     dataset_class = dataset_dict[args.dataset_type]
     train_online_dataset = dataset_class(args, split='train_online', num_frames=k)
@@ -214,30 +232,6 @@ def train_online(star_model, args, logger_wandb):
     
     star_model.gt_poses = train_online_dataset.get_gt_vehicle_poses(args).to(device)
 
-    # Create optimizer
-    optimizer = torch.optim.Adam([
-        {'params': star_model.poses_, 'lr': args.lrate_pose}, 
-        {'params': star_model.get_nerf_params()}
-    ], lr=args.lrate, betas=(0.9, 0.999))
-    
-    '''print('optimizer devices')
-    for group in optimizer.param_groups:
-        for p in group['params']:
-            print(p.device)
-            if p.grad is not None:
-                print(p.grad.device)
-                if p.grad.device != device:
-                    print(p)'''
-
-    scheduler = LambdaLR(optimizer, lr_lambda=get_scheduler_online(args))
-
-    #TODO: Load checkpoint for online training
-    step_restored = 0
-    '''if args.ckpt_path is not None:
-        step_restored = load_ckpt(args.ckpt_path, model_coarse, model_fine, optimizer, scheduler)
-        print("Resuming from step:", step_restored)
-    else:
-        print("No checkpoint given, starting from scratch")'''
 
     print('use_batching', train_online_dataset.use_batching)
     print('number of batches', len(train_online_dataloader))
@@ -248,7 +242,12 @@ def train_online(star_model, args, logger_wandb):
     for step in tqdm(range(step_restored+1, epochs+1), desc="Online Training epochs"):
 
         if step != step_restored+1 and train_fine_loss_running / len(train_online_dataloader) < m2:
-            print('Incrementing k to:', k+1)
+            path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
+            save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k)
+            
+            if k == 15: # TODO num_frames from args
+                break            
+            print('Incrementing k to:', k+1, 'at step', step)
             k += 1
             train_online_dataset = dataset_class(args, split='train_online', num_frames=k)
             val_online_dataset = dataset_class(args, split='val_online', num_frames=k)
@@ -269,8 +268,8 @@ def train_online(star_model, args, logger_wandb):
                 shuffle=True,
                 pin_memory=True)
             with torch.no_grad():
-                new_poses = star_model.poses_.detach().clone()
-                new_poses[k,:] = star_model.poses_[k-1,:].detach().clone()
+                new_poses = star_model.poses_.detach().clone() 
+                new_poses[k-2,:] = star_model.poses_[k-3,:].detach().clone()
                 star_model.poses_.copy_(new_poses)
 
 
@@ -299,23 +298,12 @@ def train_online(star_model, args, logger_wandb):
             img_loss0 = img2mse(extras['rgb0'], target)
             loss = img_loss + img_loss0
             psnr0 = mse2psnr(img_loss0)
-            #loss += args.entropy_weight * (entropy + extras['entropy0']) # TODO - or +, also try with no entropy regularization
+            loss += args.entropy_weight * (entropy + extras['entropy0']) #TODO entropy!
             
 
             loss.backward()
 
-            '''print('optimizer devices')
-            for group in optimizer.param_groups:
-                for p in group['params']:
-                    print(p.device)
-                    if p.grad is not None:
-                        print(p.grad.device)
-                        if p.grad.device != device:
-                            print(p)'''
-
             optimizer.step()
-
-            
             
             train_fine_loss_running += img_loss.item()
             train_loss_running += loss.item()
@@ -328,16 +316,17 @@ def train_online(star_model, args, logger_wandb):
 
         # Log loss and psnr
         if step % args.epoch_print == 0:
-            avg_loss = train_fine_loss_running / len(train_online_dataloader) 
+            avg_fine_loss = train_fine_loss_running / len(train_online_dataloader) 
+            avg_loss = train_loss_running / len(train_online_dataloader)
             avg_psnr = train_psnr_running / len(train_online_dataloader)
             avg_psnr0 = train_psnr0_running / len(train_online_dataloader)
-            print(f'Epoch: {step}, Loss: {avg_loss}, PSNR: {avg_psnr}')
-            logger_wandb.log_train_online(step, avg_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None)        
+            tqdm.write(f'Epoch: {step}, Avg Fine Loss: {avg_fine_loss}, Avg Loss: {avg_loss}, PSNR: {avg_psnr}')
+            logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None)        
 
         # Save checkpoint
         if step % args.epoch_ckpt == 0:
             path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
-            save_ckpt_star(path, star_model, optimizer, scheduler, step)
+            save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k)
 
         # Validation step, render one random view from validation set
         if step % args.epoch_val == 0:
@@ -402,6 +391,8 @@ def train():
         if args.appearance_ckpt_path is not None:
             load_ckpt_appearance(args.appearance_ckpt_path, star_model, device)
             print("Appearance initialization skipped and ckpt loaded.")
+        elif args.online_ckpt_path is not None:
+            print("Online training checkpoint provided, skipping appearance initialization and loading that checkpoint...")
         else:
             raise RuntimeError('Checkpoint for appearance initialization should be provided if it is skipped')
     else:

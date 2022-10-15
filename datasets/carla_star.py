@@ -33,6 +33,15 @@ rot_phi = lambda phi : np.array([
     [0,0,0,1]], dtype=np.float32)
 
 
+def pose_translational(t):
+    return np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, t],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+
+
 def pose_spherical(theta, radius):
     c2w = trans_z(6.)
     c2w = rot_phi(-25. / 180. * np.pi) @ c2w
@@ -70,15 +79,18 @@ def from_ue4_to_nerf(pose):
 
 
 class CarlaStarDataset(BaseStarDataset):
-    def __init__(self, args, split, num_frames):
+    def __init__(self, args, split, num_frames=None):
         super().validate_split(split)
         self.split = split
         self.num_frames = num_frames
 
-        if split == 'render_video': # TODO
-            # Render video using evenly spaced views
-            poses = np.stack([pose_spherical(angle, 20.0) for angle in np.linspace(-180,180,40+1)[:-1]], axis=0)
+        if split == 'render_video':
+            # Render video by moving the car
+            self.object_poses = np.stack([pose_translational(t) for t in np.arange(0., 8., 0.25)], axis=0) 
+            #self.object_poses = self.get_gt_vehicle_poses(args)
+            poses = pose_spherical(-90., 15.)[None, ...]
             imgs = None
+            frames = None
         else:
             imgs, poses, frames = self.load_imgs_poses(args, split)
 
@@ -91,7 +103,7 @@ class CarlaStarDataset(BaseStarDataset):
         self.imgs = imgs
         self.poses = poses
         self.frames = frames
-        self.near = 6. 
+        self.near = 3. 
         self.far = 100.
         print('near', self.near)
         print('far', self.far)

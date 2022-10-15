@@ -20,7 +20,7 @@ class BaseStarDataset(Dataset):
         self.use_batching = not args.no_batching 
         
 
-        if self.split in ['test','render_video'] and args.render_factor!=0: # TODO
+        if self.split in ['test','render_video'] and args.render_factor!=0:
             # Render downsampled for speed
             self.H = self.H//args.render_factor
             self.W = self.W//args.render_factor
@@ -89,8 +89,8 @@ class BaseStarDataset(Dataset):
             return self.imgs.shape[0] * self.num_frames
         elif self.split == 'test': # TODO
             return len(self.imgs)
-        elif self.split == 'render_video': # TODO
-            return len(self.poses)
+        elif self.split == 'render_video':
+            return len(self.object_poses)
         else:
             raise ValueError("invalid dataset split")
 
@@ -166,23 +166,22 @@ class BaseStarDataset(Dataset):
             target = torch.reshape(target, [-1,3]) # (H*W, 3)
             frames = self.frames.reshape((-1,1))[idx,...].repeat(self.H * self.W, axis=0)[..., None] # (H*W, 1)
             #print('frames shape', frames.shape)
-        elif self.split == 'render_video': # TODO
-            pose = self.poses[idx, :3, :4]
+        elif self.split == 'render_video':
+            pose = self.poses[0, :3, :4]
             rays_o, rays_d = get_rays(self.H, self.W, self.K, torch.Tensor(pose))
             rays_o = torch.reshape(rays_o, [-1,3]) # (H*W, 3)
             rays_d = torch.reshape(rays_d, [-1,3]) # (H*W, 3)
-            if self.render_test:
-                target = self.imgs[idx]
-                target = torch.Tensor(target) 
-                target = torch.reshape(target, [-1,3]) # (H*W, 3)
-            else:
-                target = None
+            target = None
+            frames = None
+            object_pose = self.object_poses[idx, ...]
         
         result = (rays_o, rays_d)
         if target is not None:
             result += (target,)
         if frames is not None:
             result += (frames,)        
+        if self.split == 'render_video':
+            result += (object_pose,)
         return result
 
     # used for debugging
@@ -208,10 +207,10 @@ class BaseStarDataset(Dataset):
         Create sampled points and view directions using ray origins and directions
         """
         
-        if self.split == 'render_video' and not self.render_test: # TODO
-            rays_o, rays_d = default_collate(batch)
+        if self.split == 'render_video':
+            rays_o, rays_d, object_pose = default_collate(batch)
             target = None
-            frames = None # TODO makes sense?
+            frames = None
         elif self.split == 'train_online' or self.split == 'val_online':
             rays_o, rays_d, target, frames = default_collate(batch)
         else:
@@ -227,6 +226,8 @@ class BaseStarDataset(Dataset):
                 target = target[0]
             if frames is not None:
                 frames = frames[0]
+            if self.split == 'render_video':
+                object_pose = object_pose[0]
                 
 
         viewdirs = None
@@ -262,9 +263,12 @@ class BaseStarDataset(Dataset):
 
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
-        return pts, viewdirs, z_vals, rays_o, rays_d, target, frames
+        if self.split == 'render_video':
+            return pts, viewdirs, z_vals, rays_o, rays_d, object_pose
+        else:
+            return pts, viewdirs, z_vals, rays_o, rays_d, target, frames
     
-    # TODO test, render_video?
+    # TODO test?
     @staticmethod
     def validate_split(split):
         splits = ['train_appearance', 'val_appearance', 'train_online', 'val_online', 'test', 'render_video'] 

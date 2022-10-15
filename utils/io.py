@@ -32,11 +32,24 @@ def load_ckpt_appearance(ckpt_path, star_model, device):
     ckpt = torch.load(ckpt_path, map_location=device) #TODO map location not required?
     star_model.load_state_dict(ckpt['star_model'], strict=False) #TODO remove strict
 
+def load_ckpt_online(ckpt_path, star_model, optimizer, scheduler):
+    ckpt = torch.load(ckpt_path)
+    star_model.load_state_dict(ckpt['star_model'])
+    optimizer.load_state_dict(ckpt['optimizer'])
+    scheduler.load_state_dict(ckpt['scheduler'])
+    step_restored = ckpt['step']
+    k = ckpt['k']
+    return step_restored, k 
+
 def load_ckpt_for_test(ckpt_path, model_coarse, model_fine):
     ckpt = torch.load(ckpt_path)
     model_coarse.load_state_dict(ckpt['model_coarse'])
     if model_fine is not None:
         model_fine.load_state_dict(ckpt['model_fine'])
+
+def load_star_ckpt_for_test(ckpt_path, star_model):
+    ckpt = torch.load(ckpt_path)
+    star_model.load_state_dict(ckpt['star_model'])
 
 
 def save_ckpt(path, model_coarse, model_fine, optimizer, scheduler, step):
@@ -55,6 +68,16 @@ def save_ckpt_star(path, star_model, optimizer, scheduler, step):
         'star_model': star_model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'scheduler': scheduler.state_dict()
+    }, path)
+    print('Saved checkpoints at', path)
+
+def save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k):
+    torch.save({
+        'step': step,
+        'star_model': star_model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict(),
+        'k': k
     }, path)
     print('Saved checkpoints at', path)
 

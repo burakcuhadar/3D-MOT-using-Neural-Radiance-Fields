@@ -78,13 +78,15 @@ class LoggerWandb():
         self.run.log({"test table": test_table})
 
     # For vanilla NeRF
-    def log_video(self, rgb_path, disp_path):
+    def log_video(self, rgb_path, disp_path, rgb_static_path, rgb_dynamic_path):
         # Create video table
-        columns = ["rgb", "disp"]
+        columns = ["rgb", "disp", "rgb static", "rgb dynamic"]
         video_table = wandb.Table(columns=columns)
         video_table.add_data(
             wandb.Video(rgb_path, fps=30, format="mp4"), 
-            wandb.Video(disp_path, fps=30, format="mp4"))
+            wandb.Video(disp_path, fps=30, format="mp4"),
+            wandb.Video(rgb_static_path, fps=30, format="mp4"),
+            wandb.Video(rgb_dynamic_path, fps=30, format="mp4"))
         self.run.log({"video table": video_table})
 
 
