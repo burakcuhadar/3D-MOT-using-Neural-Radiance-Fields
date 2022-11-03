@@ -66,7 +66,18 @@ class LoggerWandb():
         self.run.log({"val online loss": loss, "val online psnr": psnr, "epoch": epoch})
         self.run.log({"val online table": val_table, "epoch": epoch})
 
+    def log_train_render(self, epoch, rgb, gt_rgb, rgb_static, rgb_dynamic, disp, acc, rgb0=None, rgb_static0=None, 
+        rgb_dynamic0=None, disp0=None, z_std=None):
+        
+        # Create table
+        columns = ["epoch", "rgb", "gt rgb", "rgb static", "rgb dynamic", "disp", "acc", "rgb_coarse", "rgb static coarse", "rgb dynamic coarse", "disp_coarse", "z_std"]
+        train_table = wandb.Table(columns=columns)
 
+        train_table.add_data(epoch, wandb.Image(rgb), wandb.Image(gt_rgb), wandb.Image(rgb_static), 
+            wandb.Image(rgb_dynamic), wandb.Image(disp), wandb.Image(acc), wandb.Image(rgb0), wandb.Image(rgb_static0), 
+            wandb.Image(rgb_dynamic0), wandb.Image(disp0), wandb.Image(z_std))
+        
+        self.run.log({"train view render": train_table, "epoch": epoch})
 
     # For vanilla NeRF
     def log_test(self, loss, psnr, rgbs, disps):

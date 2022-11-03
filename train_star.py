@@ -39,6 +39,105 @@ def get_scheduler_online(args):
 
     return [pose_schedule, nerf_schedule]
 
+
+def val_step(val_dataset, val_dataloader, train_render_dataset, train_render_dataloader, star_model, args, step, logger):
+    
+    val_H = val_dataset.H
+    val_W = val_dataset.W
+
+    val_batch = next(iter(val_dataloader))
+    val_dataset.move_batch_to_device(val_batch, device)
+    pts, viewdirs, z_vals, rays_o, rays_d, target, frames = val_batch
+    star_model.eval()
+    with torch.no_grad():
+        rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
+            frames=frames, retraw=True, N_importance=args.N_importance)
+    
+    val_mse = img2mse(rgb, target)
+    psnr = mse2psnr(val_mse)
+    rgb0, disp0, z_std = None, None, None
+    if 'rgb0' in extras:
+        rgb0, disp0, z_std = extras['rgb0'], extras['disp0'], extras['z_std']
+        rgb0 = to8b(torch.reshape(rgb0, (val_H, val_W, 3)).cpu().detach().numpy())
+        disp0 = to8b(torch.reshape(disp0, (val_H, val_W, 1)).cpu().detach().numpy())
+        z_std = to8b(torch.reshape(z_std, (val_H, val_W, 1)).cpu().detach().numpy())
+    
+    rgb = to8b(torch.reshape(rgb, (val_H, val_W, 3)).cpu().detach().numpy())
+    rgb_static = to8b(torch.reshape(extras['rgb_map_static'], (val_H, val_W, 3)).cpu().detach().numpy())
+    rgb_dynamic = to8b(torch.reshape(extras['rgb_map_dynamic'], (val_H, val_W, 3)).cpu().detach().numpy())
+    rgb_static0 = to8b(torch.reshape(extras['rgb_map_static0'], (val_H, val_W, 3)).cpu().detach().numpy())
+    rgb_dynamic0 = to8b(torch.reshape(extras['rgb_map_dynamic0'], (val_H, val_W, 3)).cpu().detach().numpy())
+    disp = to8b(torch.reshape(disp, (val_H, val_W, 1)).cpu().detach().numpy())
+    acc = to8b(torch.reshape(acc, (val_H, val_W, 1)).cpu().detach().numpy())
+    target = to8b(torch.reshape(target, (val_H, val_W, 3)).cpu().detach().numpy())
+    
+    logger.log_val_online(step, val_mse, psnr, rgb, target, rgb_static, rgb_dynamic, disp, acc, rgb0, 
+        rgb_static0, rgb_dynamic0, disp0, z_std)
+
+    # render one random view with random vehicle pose from train dataset
+    train_W = train_render_dataset.W
+    train_H = train_render_dataset.H
+    train_batch = next(iter(train_render_dataloader))
+    train_render_dataset.move_batch_to_device(train_batch, device)
+    pts, viewdirs, z_vals, rays_o, rays_d, target, frames = train_batch
+    star_model.eval()
+    with torch.no_grad():
+        rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
+            frames=frames, retraw=True, N_importance=args.N_importance)
+    
+    rgb0, disp0, z_std = None, None, None
+    if 'rgb0' in extras:
+        rgb0, disp0, z_std = extras['rgb0'], extras['disp0'], extras['z_std']
+        rgb0 = to8b(torch.reshape(rgb0, (train_H, train_W, 3)).cpu().detach().numpy())
+        disp0 = to8b(torch.reshape(disp0, (train_H, train_W, 1)).cpu().detach().numpy())
+        z_std = to8b(torch.reshape(z_std, (train_H, train_W, 1)).cpu().detach().numpy())
+    
+    rgb = to8b(torch.reshape(rgb, (train_H, train_W, 3)).cpu().detach().numpy())
+    rgb_static = to8b(torch.reshape(extras['rgb_map_static'], (train_H, train_W, 3)).cpu().detach().numpy())
+    rgb_dynamic = to8b(torch.reshape(extras['rgb_map_dynamic'], (train_H, train_W, 3)).cpu().detach().numpy())
+    rgb_static0 = to8b(torch.reshape(extras['rgb_map_static0'], (train_H, train_W, 3)).cpu().detach().numpy())
+    rgb_dynamic0 = to8b(torch.reshape(extras['rgb_map_dynamic0'], (train_H, train_W, 3)).cpu().detach().numpy())
+    disp = to8b(torch.reshape(disp, (train_H, train_W, 1)).cpu().detach().numpy())
+    acc = to8b(torch.reshape(acc, (train_H, train_W, 1)).cpu().detach().numpy())
+    target = to8b(torch.reshape(target, (train_H, train_W, 3)).cpu().detach().numpy())
+    
+    logger.log_train_render(step, rgb, target, rgb_static, rgb_dynamic, disp, acc, rgb0, rgb_static0, rgb_dynamic0, 
+        disp0, z_std)
+    
+
+def setup_dataset(dataset_class, args, k):
+    train_online_dataset = dataset_class(args, split='train_online', num_frames=k)
+    train_online_dataloader = DataLoader(
+        train_online_dataset, 
+        batch_size = 1 if args.no_batching else args.N_rand,
+        num_workers=args.num_workers,
+        collate_fn=train_online_dataset.collate_sample_pts_and_viewdirs,
+        shuffle=True,
+        pin_memory=True)    
+    
+    val_online_dataset = dataset_class(args, split='val_online', num_frames=k)
+    val_online_dataloader = DataLoader (
+        val_online_dataset,
+        batch_size=1, 
+        num_workers=1,
+        collate_fn=val_online_dataset.collate_sample_pts_and_viewdirs,
+        shuffle=True,
+        pin_memory=True)
+
+    train_render_dataset = dataset_class(args, split='train_render', num_frames=k)
+    train_render_dataloader = DataLoader(
+        train_render_dataset,
+        batch_size=1,
+        num_workers=1,
+        collate_fn=train_render_dataset.collate_sample_pts_and_viewdirs,
+        shuffle=True,
+        pin_memory=True
+    )
+    
+    return train_online_dataset, train_online_dataloader, val_online_dataset, val_online_dataloader, \
+        train_render_dataset, train_render_dataloader
+
+
 def train_appearance_init(star_model, args, logger_wandb):
     # Create training dataset/loader for appearance initialization  
     dataset_class = dataset_dict[args.dataset_type]
@@ -201,37 +300,10 @@ def train_online(star_model, args, logger_wandb):
     
     # Create training dataset/loader for online training  
     dataset_class = dataset_dict[args.dataset_type]
-    train_online_dataset = dataset_class(args, split='train_online', num_frames=k)
-    train_num_views = len(train_online_dataset.imgs)
-    train_H = train_online_dataset.H
-    train_W = train_online_dataset.W
-    
-    train_online_dataloader = DataLoader(
-        train_online_dataset, 
-        batch_size = 1 if args.no_batching else args.N_rand,
-        #sampler=SubsetRandomSampler(range(train_num_views * k * train_H * train_W)),
-        num_workers=args.num_workers,
-        collate_fn=train_online_dataset.collate_sample_pts_and_viewdirs,
-        shuffle=True,
-        pin_memory=True)
+    train_online_dataset, train_online_dataloader, val_online_dataset, val_online_dataloader, train_render_dataset, \
+        train_render_dataloader = setup_dataset(dataset_class, args, k)
 
-    # Create validation dataset/loader for online training
-    val_online_dataset = dataset_class(args, split='val_online', num_frames=k)
-    val_num_views = len(val_online_dataset.imgs)
-    val_H = val_online_dataset.H
-    val_W = val_online_dataset.W
-    
-    val_online_dataloader = DataLoader (
-        val_online_dataset,
-        batch_size=1, 
-        #sampler=SubsetRandomSampler(range(val_num_views * k * val_H * val_W)), 
-        num_workers=1,
-        collate_fn=val_online_dataset.collate_sample_pts_and_viewdirs,
-        shuffle=True,
-        pin_memory=True)
-    
     star_model.gt_poses = train_online_dataset.get_gt_vehicle_poses(args).to(device)
-
 
     print('use_batching', train_online_dataset.use_batching)
     print('number of batches', len(train_online_dataloader))
@@ -245,28 +317,18 @@ def train_online(star_model, args, logger_wandb):
             path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
             save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k)
             
+            # visualize one of val views
+            val_step(val_online_dataset, val_online_dataloader, train_render_dataset, train_render_dataloader, 
+                star_model, args, step, logger_wandb)
+            
             if k == 15: # TODO num_frames from args
                 break            
             print('Incrementing k to:', k+1, 'at step', step)
             k += 1
-            train_online_dataset = dataset_class(args, split='train_online', num_frames=k)
-            val_online_dataset = dataset_class(args, split='val_online', num_frames=k)
-            train_online_dataloader = DataLoader(
-                train_online_dataset, 
-                batch_size = 1 if args.no_batching else args.N_rand,
-                #sampler=SubsetRandomSampler(range(train_num_views * k * train_H * train_W)),
-                num_workers=args.num_workers,
-                collate_fn=train_online_dataset.collate_sample_pts_and_viewdirs,
-                shuffle=True,
-                pin_memory=True)
-            val_online_dataloader = DataLoader (
-                val_online_dataset,
-                batch_size=1, 
-                #sampler=SubsetRandomSampler(range(val_num_views * k * val_H * val_W)), 
-                num_workers=1,
-                collate_fn=val_online_dataset.collate_sample_pts_and_viewdirs,
-                shuffle=True,
-                pin_memory=True)
+            
+            train_online_dataset, train_online_dataloader, val_online_dataset, val_online_dataloader, \
+                train_render_dataset, train_render_dataloader = setup_dataset(dataset_class, args, k)
+
             with torch.no_grad():
                 new_poses = star_model.poses_.detach().clone() 
                 new_poses[k-2,:] = star_model.poses_[k-3,:].detach().clone()
@@ -332,36 +394,9 @@ def train_online(star_model, args, logger_wandb):
         if step % args.epoch_val == 0:
             # Optimized poses
             #print(star_model.poses_)
-
-            val_batch = next(iter(val_online_dataloader))
-            val_online_dataset.move_batch_to_device(val_batch, device)
-            pts, viewdirs, z_vals, rays_o, rays_d, target, frames = val_batch
-            star_model.eval()
-            with torch.no_grad():
-                rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-                    frames=frames, retraw=True, N_importance=args.N_importance)
-            
-            val_mse = img2mse(rgb, target)
-            psnr = mse2psnr(val_mse)
-            rgb0, disp0, z_std = None, None, None
-            if 'rgb0' in extras:
-                rgb0, disp0, z_std = extras['rgb0'], extras['disp0'], extras['z_std']
-                rgb0 = to8b(torch.reshape(rgb0, (val_H, val_W, 3)).cpu().detach().numpy())
-                disp0 = to8b(torch.reshape(disp0, (val_H, val_W, 1)).cpu().detach().numpy())
-                z_std = to8b(torch.reshape(z_std, (val_H, val_W, 1)).cpu().detach().numpy())
-            
-            rgb = to8b(torch.reshape(rgb, (val_H, val_W, 3)).cpu().detach().numpy())
-            rgb_static = to8b(torch.reshape(extras['rgb_map_static'], (val_H, val_W, 3)).cpu().detach().numpy())
-            rgb_dynamic = to8b(torch.reshape(extras['rgb_map_dynamic'], (val_H, val_W, 3)).cpu().detach().numpy())
-            rgb_static0 = to8b(torch.reshape(extras['rgb_map_static0'], (val_H, val_W, 3)).cpu().detach().numpy())
-            rgb_dynamic0 = to8b(torch.reshape(extras['rgb_map_dynamic0'], (val_H, val_W, 3)).cpu().detach().numpy())
-            disp = to8b(torch.reshape(disp, (val_H, val_W, 1)).cpu().detach().numpy())
-            acc = to8b(torch.reshape(acc, (val_H, val_W, 1)).cpu().detach().numpy())
-            target = to8b(torch.reshape(target, (val_H, val_W, 3)).cpu().detach().numpy())
-            
-            logger_wandb.log_val_online(step, val_mse, psnr, rgb, target, rgb_static, rgb_dynamic, disp, acc, rgb0, 
-                rgb_static0, rgb_dynamic0, disp0, z_std)
-    
+            val_step(val_online_dataset, val_online_dataloader, train_render_dataset, train_render_dataloader, 
+                star_model, args, step, logger_wandb)
+         
 
 
 

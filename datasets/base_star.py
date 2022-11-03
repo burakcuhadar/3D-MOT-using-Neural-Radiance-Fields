@@ -6,7 +6,6 @@ from torch.utils.data.dataloader import default_collate
 from models.rendering import get_rays, ndc_rays, get_rays_np
 
 
-# TODO test, render_test, render_video?
 class BaseStarDataset(Dataset):
     def __init__(self, args):
         self.render_test = args.render_test
@@ -91,6 +90,8 @@ class BaseStarDataset(Dataset):
             return len(self.imgs)
         elif self.split == 'render_video':
             return len(self.object_poses)
+        elif self.split == 'train_render':
+            return self.imgs.shape[0] * self.num_frames
         else:
             raise ValueError("invalid dataset split")
 
@@ -166,6 +167,15 @@ class BaseStarDataset(Dataset):
             target = torch.reshape(target, [-1,3]) # (H*W, 3)
             frames = self.frames.reshape((-1,1))[idx,...].repeat(self.H * self.W, axis=0)[..., None] # (H*W, 1)
             #print('frames shape', frames.shape)
+        elif self.split == 'train_render':
+            target = self.imgs.reshape((-1, self.H, self.W, 3))[idx, ...] # (N*num_frames, H, W, 3) => (H, W, 3)
+            target = torch.Tensor(target) 
+            pose = self.poses[idx // self.num_frames, :3, :4]
+            rays_o, rays_d = get_rays(self.H, self.W, self.K, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
+            rays_o = torch.reshape(rays_o, [-1,3]) # (H*W, 3)
+            rays_d = torch.reshape(rays_d, [-1,3]) # (H*W, 3)
+            target = torch.reshape(target, [-1,3]) # (H*W, 3)
+            frames = self.frames.reshape((-1,1))[idx,...].repeat(self.H * self.W, axis=0)[..., None] # (H*W, 1)
         elif self.split == 'render_video':
             pose = self.poses[0, :3, :4]
             rays_o, rays_d = get_rays(self.H, self.W, self.K, torch.Tensor(pose))
@@ -211,14 +221,14 @@ class BaseStarDataset(Dataset):
             rays_o, rays_d, object_pose = default_collate(batch)
             target = None
             frames = None
-        elif self.split == 'train_online' or self.split == 'val_online':
+        elif self.split == 'train_online' or self.split == 'val_online' or 'train_render':
             rays_o, rays_d, target, frames = default_collate(batch)
         else:
             rays_o, rays_d, target = default_collate(batch)
             frames = None
         
 
-        if (self.split == 'train_appearance' and not self.use_batching) or (self.split == 'train_online' and not self.use_batching) or self.split in ['val_appearance', 'val_online', 'test', 'render_video']: # TODO what else?
+        if (self.split == 'train_appearance' and not self.use_batching) or (self.split == 'train_online' and not self.use_batching) or self.split in ['val_appearance', 'val_online', 'test', 'render_video', 'train_render']: # TODO what else?
             # Batch size is 1 in this case
             rays_o = rays_o[0]
             rays_d = rays_d[0]
@@ -268,10 +278,9 @@ class BaseStarDataset(Dataset):
         else:
             return pts, viewdirs, z_vals, rays_o, rays_d, target, frames
     
-    # TODO test?
     @staticmethod
     def validate_split(split):
-        splits = ['train_appearance', 'val_appearance', 'train_online', 'val_online', 'test', 'render_video'] 
+        splits = ['train_appearance', 'val_appearance', 'train_online', 'val_online', 'test', 'render_video', 'train_render'] 
         assert split in splits, "Dataset split should be one of " + ", ".join(splits)
 
     

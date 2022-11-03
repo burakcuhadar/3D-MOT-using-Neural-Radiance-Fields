@@ -7,16 +7,15 @@ dataset_type = carla_star
 skip_appearance_init = True
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2xsmkzoj/online_epoch_1200.ckpt
 #appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2tltpu5d/appearance_epoch_347.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_37w1grcc/online_epoch_1700.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_34jqm885/online_epoch_1500.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_246r8n3p/online_epoch_250.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_3nwg9itc/online_epoch_150.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2r5qkag3/online_epoch_500.ckpt
-online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2et6y07b/online_epoch_550.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2fthgaln/online_epoch_1350.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_l6an1y0y/online_epoch_1450.ckpt
+online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_12sod893/online_epoch_1600.ckpt
 
 # For testing 
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2zjmk8lv/online_epoch_1229.ckpt
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2f7r3yy4/online_epoch_2074.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_kl0p1yql/online_epoch_1015.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_kl0p1yql/online_epoch_1015.ckpt
 
 # to train appearnace init
 #skip_appearance_init = False

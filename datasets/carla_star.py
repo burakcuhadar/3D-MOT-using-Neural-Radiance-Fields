@@ -36,7 +36,7 @@ rot_phi = lambda phi : np.array([
 def pose_translational(t):
     return np.array([
         [1, 0, 0, 0],
-        [0, 1, 0, 0],
+        [0, 1, 0, 0], 
         [0, 0, 1, t],
         [0, 0, 0, 1]
     ], dtype=np.float32)
@@ -159,7 +159,7 @@ class CarlaStarDataset(BaseStarDataset):
         poses = []
         
         for i, cam in enumerate(cameras):
-            if self.split == 'train_appearance' or self.split == 'train_online':
+            if self.split == 'train_appearance' or self.split == 'train_online' or self.split == 'train_render':
                 if i >= 50:
                     continue
             elif self.split == 'val_appearance' or self.split == 'val_online':
