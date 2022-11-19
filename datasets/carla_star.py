@@ -86,7 +86,7 @@ class CarlaStarDataset(BaseStarDataset):
 
         if split == 'render_video':
             # Render video by moving the car
-            self.object_poses = np.stack([pose_translational(t) for t in np.arange(0., 8., 0.25)], axis=0) 
+            self.object_poses = np.stack([pose_translational(t) for t in np.arange(-2., 8., 0.25)], axis=0) 
             #self.object_poses = self.get_gt_vehicle_poses(args)
             poses = pose_spherical(-90., 15.)[None, ...]
             imgs = None
@@ -134,7 +134,7 @@ class CarlaStarDataset(BaseStarDataset):
     def get_gt_vehicle_poses(self, args):
         pose_files = sorted(glob(args.datadir + '/poses/*.npy'), key=natural_keys)
         poses = []
-        pose0 = None
+        '''pose0 = None
         for i, f in enumerate(pose_files):
             if i == 0:
                 pose0 = from_ue4_to_nerf(np.load(f))
@@ -145,7 +145,18 @@ class CarlaStarDataset(BaseStarDataset):
                 posei_inv[:3,:3] = posei[:3,:3].T
                 posei_inv[:3,-1] = -posei[:3,:3].T @ posei[:3,-1]
                 pose = pose0 @ posei_inv
+                #TODO how to scale?
                 poses.append(pose.astype(np.float32))
+        '''
+        for f in pose_files:
+            posei = from_ue4_to_nerf(np.load(f))
+            if args.scale_factor > 0:
+                posei[:3,3] *= args.scale_factor
+            posei_inv = np.eye(4, dtype=np.float32)
+            posei_inv[:3,:3] = posei[:3,:3].T
+            posei_inv[:3,-1] = -posei[:3,:3].T @ posei[:3,-1]    
+            poses.append(posei_inv.astype(np.float32))
+
         poses = np.stack(poses, axis=0)
         poses = torch.from_numpy(poses)
         return poses

@@ -221,7 +221,7 @@ class BaseStarDataset(Dataset):
             rays_o, rays_d, object_pose = default_collate(batch)
             target = None
             frames = None
-        elif self.split == 'train_online' or self.split == 'val_online' or 'train_render':
+        elif self.split == 'train_online' or self.split == 'val_online' or self.split == 'train_render':
             rays_o, rays_d, target, frames = default_collate(batch)
         else:
             rays_o, rays_d, target = default_collate(batch)

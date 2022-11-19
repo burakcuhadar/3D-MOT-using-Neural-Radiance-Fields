@@ -5,17 +5,20 @@ dataset_type = carla_star
 
 # to load appearance init ckpt
 skip_appearance_init = True
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2xsmkzoj/online_epoch_1200.ckpt
-#appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2tltpu5d/appearance_epoch_347.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2fthgaln/online_epoch_1350.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_l6an1y0y/online_epoch_1450.ckpt
-online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_12sod893/online_epoch_1600.ckpt
+
+
+# appearance for center car
+#appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_1yfts7ow/appearance_epoch_258.ckpt
+# apperance for original dataset N_samples 128
+appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_uafk0n6d/appearance_epoch_237.ckpt
+
+# old one
+# appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2tltpu5d/appearance_epoch_347.ckpt
+
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_6ymr4f6n/online_epoch_250.ckpt
 
 # For testing 
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2zjmk8lv/online_epoch_1229.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2f7r3yy4/online_epoch_2074.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_kl0p1yql/online_epoch_1015.ckpt
-#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_kl0p1yql/online_epoch_1015.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_ijv58ml9/online_epoch_279.ckpt
 
 # to train appearnace init
 #skip_appearance_init = False
@@ -35,10 +38,10 @@ netchunk = 16384
 
 scale_factor = 0.2
 
-N_samples = 256
+N_samples = 128
 N_importance = 256
-N_rand = 1600
-chunk = 1400
+N_rand = 1200
+chunk = 1200
 
 num_workers = 2
 
@@ -52,12 +55,12 @@ num_workers = 2
 no_batching = True
 epochs_appearance = 5000
 epochs_online = 50000
-epoch_ckpt = 50
+epoch_ckpt = 25
 epoch_print = 5
 epoch_val = 50
 
 appearance_init_thres = 2e-3
-online_thres = 7e-4
+online_thres = 1e-3
 initial_num_frames = 5
 entropy_weight = 1e-4
 
