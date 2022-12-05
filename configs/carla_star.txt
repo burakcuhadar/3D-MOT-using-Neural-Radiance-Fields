@@ -16,6 +16,7 @@ appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radian
 # appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2tltpu5d/appearance_epoch_347.ckpt
 
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_6ymr4f6n/online_epoch_250.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2cay9q5d/online_epoch_500.ckpt
 
 # For testing 
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_ijv58ml9/online_epoch_279.ckpt
@@ -27,7 +28,7 @@ appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radian
 use_viewdirs = True
 
 lrate = 5e-4
-lrate_pose = 5e-4
+lrate_pose = 1e-5
 #lrate_decay_steps = [15, 35, 55, 75, 300]
 lrate_decay = 1000
 lrate_decay_rate = 0.5
@@ -60,9 +61,10 @@ epoch_print = 5
 epoch_val = 50
 
 appearance_init_thres = 2e-3
-online_thres = 1e-3
+online_thres = 9e-4
 initial_num_frames = 5
-entropy_weight = 1e-4
+entropy_weight = 1e-3
 
 no_test_set = True
 save_video_frames = True
+

@@ -4,7 +4,7 @@ from glob import glob
 import imageio 
 import torch
 import re
-
+from pytorch3d.transforms import se3_log_map
 from datasets.base_star import BaseStarDataset
 
 
@@ -40,6 +40,12 @@ def pose_translational(t):
         [0, 0, 1, t],
         [0, 0, 0, 1]
     ], dtype=np.float32)
+
+def invert_transformation(t):
+    t_inv = np.eye(4, dtype=np.float32)
+    t_inv[:3,:3] = t[:3,:3].T
+    t_inv[:3,-1] = -t[:3,:3].T @ t[:3,-1]
+    return t_inv
 
 
 def pose_spherical(theta, radius):
@@ -94,7 +100,8 @@ class CarlaStarDataset(BaseStarDataset):
         else:
             imgs, poses, frames = self.load_imgs_poses(args, split)
 
-        
+        self.gt_vehicle_poses = self.get_gt_vehicle_poses(args)
+        self.gt_relative_poses = self.load_gt_relative_poses()
         H, W, focal = self.load_intrinsics(args)
         self.H = int(H)
         self.W = int(W)
@@ -145,7 +152,7 @@ class CarlaStarDataset(BaseStarDataset):
                 posei_inv[:3,:3] = posei[:3,:3].T
                 posei_inv[:3,-1] = -posei[:3,:3].T @ posei[:3,-1]
                 pose = pose0 @ posei_inv
-                #TODO how to scale?
+                # how to scale?
                 poses.append(pose.astype(np.float32))
         '''
         for f in pose_files:
@@ -160,6 +167,29 @@ class CarlaStarDataset(BaseStarDataset):
         poses = np.stack(poses, axis=0)
         poses = torch.from_numpy(poses)
         return poses
+    
+
+    def load_gt_relative_poses(self):
+        poses = []
+        pose0_inv = None
+        for i,pose in enumerate(self.gt_vehicle_poses):
+            if i == 0:
+                pose0_inv = invert_transformation(pose)
+                poses.append(np.eye(4, dtype=np.float32))
+            else:
+                posei_0 = pose @ pose0_inv
+                # for pytorch3d 4x4 format
+                posei_0_ = np.eye(4, dtype=np.float32)
+                posei_0_[:3,:3] = posei_0[:3,:3]
+                posei_0_[3,:3] = posei_0[:3,3]
+                poses.append(posei_0_)
+
+        poses = np.stack(poses, axis=0)
+        poses = torch.from_numpy(poses) # num_frames, 4, 4
+        poses = se3_log_map(poses) # num_frames, 6
+        
+        return poses
+
 
     def load_imgs_poses(self, args, split):
         extrinsics = np.load(os.path.join(args.datadir, 'extrinsics.npy'), allow_pickle=True).item()

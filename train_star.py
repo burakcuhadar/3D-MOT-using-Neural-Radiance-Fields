@@ -22,7 +22,6 @@ def get_scheduler(args, optimizer):
         return StepLR(optimizer, step_size=args.lrate_decay, gamma=args.lrate_decay_rate)
 
 def get_scheduler_online(args):
-    pose_schedule = lambda epoch: 1. # pose params lr is not decayed
     if args.lrate_decay_steps:
         # MultiStepLR
         def nerf_schedule(epoch):
@@ -37,7 +36,19 @@ def get_scheduler_online(args):
         def nerf_schedule(epoch):
             return args.lrate_decay_rate ** (epoch // args.lrate_decay)
 
-    return [pose_schedule, nerf_schedule]
+    return nerf_schedule
+
+def get_pose_metrics(poses, gt_poses):
+    gt_translation = gt_poses[:, :3]
+    gt_rotation = gt_poses[:, 3:]
+    translation = poses[:, :3]
+    rotation = poses[:, 3:]
+    
+    trans_error = torch.mean(torch.sum((translation - gt_translation)**2, axis=1).sqrt())
+    rot_error = torch.sum(torch.abs(rotation - gt_rotation), axis=1).mean()
+    return trans_error, rot_error
+    
+
 
 
 def val_step(val_dataset, val_dataloader, train_render_dataset, train_render_dataloader, star_model, args, step, logger):
@@ -281,18 +292,16 @@ def train_online(star_model, args, logger_wandb):
     k = args.initial_num_frames
 
     # Create optimizer
-    optimizer = torch.optim.Adam([
-        {'params': star_model.poses_, 'lr': args.lrate_pose}, 
-        {'params': star_model.get_nerf_params()}
-    ], lr=args.lrate, betas=(0.9, 0.999))
+    optimizer = torch.optim.Adam(star_model.get_nerf_params(), lr=args.lrate, betas=(0.9, 0.999))
+    pose_optimizer = torch.optim.SGD([star_model.poses_], lr=args.lrate_pose)
 
     scheduler = LambdaLR(optimizer, lr_lambda=get_scheduler_online(args))
-
 
     # Load checkpoint for online training
     step_restored = 0
     if args.online_ckpt_path is not None:
-        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
+        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, pose_optimizer, scheduler) 
+        #step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
         print("Resuming online training from step:", step_restored)
     else:
         print("No checkpoint given for online training, starting from scratch")
@@ -303,7 +312,7 @@ def train_online(star_model, args, logger_wandb):
     train_online_dataset, train_online_dataloader, val_online_dataset, val_online_dataloader, train_render_dataset, \
         train_render_dataloader = setup_dataset(dataset_class, args, k)
 
-    star_model.gt_poses = train_online_dataset.get_gt_vehicle_poses(args).to(device)
+    #star_model.gt_poses = train_online_dataset.get_gt_vehicle_poses(args).to(device)
 
     print('use_batching', train_online_dataset.use_batching)
     print('number of batches', len(train_online_dataloader))
@@ -317,6 +326,9 @@ def train_online(star_model, args, logger_wandb):
             path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
             save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k)
             
+            print('poses for k=', k)
+            print(star_model.get_poses())
+
             # visualize one of val views
             val_step(val_online_dataset, val_online_dataloader, train_render_dataset, train_render_dataloader, 
                 star_model, args, step, logger_wandb)
@@ -347,11 +359,12 @@ def train_online(star_model, args, logger_wandb):
             train_online_dataset.move_batch_to_device(batch, device)
             
             pts, viewdirs, z_vals, rays_o, rays_d, target, frames = batch
-            
-            optimizer.zero_grad()
 
-            rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-                frames=frames, retraw=True, N_importance=args.N_importance)
+            optimizer.zero_grad()
+            pose_optimizer.zero_grad()
+
+            rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs,
+                z_vals, rays_o, rays_d, frames=frames, retraw=True, N_importance=args.N_importance)
             
 
             # Compute loss
@@ -362,10 +375,10 @@ def train_online(star_model, args, logger_wandb):
             psnr0 = mse2psnr(img_loss0)
             loss += args.entropy_weight * (entropy + extras['entropy0']) #TODO entropy!
             
-
             loss.backward()
 
             optimizer.step()
+            pose_optimizer.step()
             
             train_fine_loss_running += img_loss.item()
             train_loss_running += loss.item()
@@ -383,8 +396,13 @@ def train_online(star_model, args, logger_wandb):
             avg_psnr = train_psnr_running / len(train_online_dataloader)
             avg_psnr0 = train_psnr0_running / len(train_online_dataloader)
             tqdm.write(f'Epoch: {step}, Avg Fine Loss: {avg_fine_loss}, Avg Loss: {avg_loss}, PSNR: {avg_psnr}')
-            logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None)        
-
+            with torch.no_grad():
+                trans_error, rot_error = get_pose_metrics(star_model.get_poses()[1:,...], 
+                    train_online_dataset.gt_relative_poses.to(device)[1:,...])
+            logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None, trans_error, rot_error)        
+            tqdm.write(f'Poses: {star_model.get_poses()}')
+            
+ 
         # Save checkpoint
         if step % args.epoch_ckpt == 0:
             path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
