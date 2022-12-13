@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 from lietorch import SE3
+from pytorch3d.transforms import se3_exp_map
 
 from models.nerf import NeRF
 from models.rendering import raw2outputs, raw2outputs_star, sample_pdf
@@ -26,11 +27,21 @@ class STaR(nn.Module):
 
         # At time 0, the pose is defined to be identity, therefore we don't optimize it, hence num_frames-1
         self.poses_ = nn.Parameter(torch.zeros((num_frames-1, 6)), requires_grad=True)
+        self.poses_grad = []
 
     def get_poses(self):
         pose0 = torch.zeros((1, 6), requires_grad=False, device=self.poses_.device)
         poses = torch.cat((pose0, self.poses_), dim=0)
         return poses
+
+    def get_poses_grad(self):
+        with torch.no_grad():
+            #for p in self.poses_grad:
+            #    print(p.shape)
+            #poses_grad = torch.cat(self.poses_grad, axis=0)
+            poses_grad = self.poses_grad[0]
+            self.poses_grad = []
+        return poses_grad
 
 
     def get_nerf_params(self):
@@ -42,6 +53,8 @@ class STaR(nn.Module):
         if frames is not None or object_pose is not None:
             entropy = 0
             rgb_map_static_chunks, rgb_map_dynamic_chunks = [], []
+        if frames is not None and object_pose is None:
+            transformed_pts_chunks = []
 
         for i in range(0, pts.shape[0], self.chunk):
             end_i = min(pts.shape[0], i + self.chunk)
@@ -60,10 +73,15 @@ class STaR(nn.Module):
             if frames is None and object_pose is None:
                 rgb_map, disp_map, acc_map, weights, depth_map = chunk_result # TODO adapt for entropy
             else:
-                rgb_map, disp_map, acc_map, weights, depth_map, entropy_, rgb_map_static, rgb_map_dynamic = chunk_result
+                if frames is not None:
+                    rgb_map, disp_map, acc_map, weights, depth_map, entropy_, rgb_map_static, rgb_map_dynamic, transformed_pts = chunk_result
+                    transformed_pts_chunks.append(transformed_pts)
+                else:
+                    rgb_map, disp_map, acc_map, weights, depth_map, entropy_, rgb_map_static, rgb_map_dynamic = chunk_result
                 entropy += entropy_
                 rgb_map_static_chunks.append(rgb_map_static)
                 rgb_map_dynamic_chunks.append(rgb_map_dynamic)
+    
             
             rgb_map_chunks.append(rgb_map)
             disp_map_chunks.append(disp_map)
@@ -80,9 +98,16 @@ class STaR(nn.Module):
         if frames is None and object_pose is None:
             return rgb_map, disp_map, acc_map, weights, depth_map
         else:
+            if frames is not None:
+                transformed_pts = torch.cat(transformed_pts_chunks, dim=0)
+                #transformed_pts.retain_grad()
+                #transformed_pts.register_hook(print)
             rgb_map_static = torch.cat(rgb_map_static_chunks, dim=0)
             rgb_map_dynamic = torch.cat(rgb_map_dynamic_chunks, dim=0)
-            return rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic
+            if frames is not None:
+                return rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic, transformed_pts
+            else:
+                return rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic
 
     def forward_chunk(self, pts, viewdirs, z_vals, rays_d, frames=None, is_coarse=True, object_pose=None):
         """STaR's forward
@@ -120,9 +145,16 @@ class STaR(nn.Module):
         elif self.gt_poses is not None:
             pose_matrices = self.gt_poses[frames,...] # [N_rays, 1, 4, 4]
         else:
-            pose = self.get_poses()[frames,...]
-            pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
-        
+            pose = self.get_poses()[frames][:,0,:] # [N_rays, 3]
+            #pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
+            pose_matrices_ = se3_exp_map(pose)
+            pose_matrices = torch.zeros((N_rays, 4, 4), device=pose.device)
+            pose_matrices[:, :3, :3] = pose_matrices_[:, :3, :3]
+            pose_matrices[:, :3, 3] = pose_matrices_[:, 3, :3]
+            pose_matrices[:, 3, 3] = 1.
+            pose_matrices = pose_matrices[:, None, ...]
+
+
         pose_matrices_pts = pose_matrices.expand((N_rays, N_samples, 4, 4)) # [N_rays, N_samples, 4, 4]
         pose_matrices_pts_flat = pose_matrices_pts.reshape((N_rays*N_samples, 4, 4)) # [N_rays*N_samples, 4, 4]
         
@@ -132,14 +164,24 @@ class STaR(nn.Module):
         pts_dynamic_homog_flat = torch.einsum('nab,nb->na', pose_matrices_pts_flat, pts_homog_flat)
         pts_dynamic_homog = pts_dynamic_homog_flat.reshape((N_rays, N_samples, 4))
         pts_dynamic = pts_dynamic_homog[..., :3] # [N_rays, N_samples, 3]
-        
+        #pts_dynamic.retain_grad()
+        #print(pts_dynamic.grad)
+        #pts_dynamic.register_hook(print)
+        if self.training:
+            pts_dynamic.register_hook(lambda grad: self.poses_grad.append(grad))
+
         viewdirs_dynamic = torch.einsum('nab,nb->na', pose_matrices[:, 0, :3, :3], viewdirs)
 
         raw_alpha_dynamic, raw_rgb_dynamic = dynamic_model(pts_dynamic, viewdirs_dynamic)
 
-        return raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rgb_dynamic, z_vals, rays_d, 
+        result = raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rgb_dynamic, z_vals, rays_d, 
             static_model.raw_noise_std if (self.training and frames is None) else 0, #From the paper: "we add small Gaussian noise to the density outputs during appearance initialization but turn it off during online training."
             static_model.white_bkgd, ret_entropy=True)
 
-        
+        if frames is not None and object_pose is None:
+            result += (pts_dynamic,)
+
+        return result
+
+
         

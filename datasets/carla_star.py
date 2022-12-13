@@ -101,7 +101,7 @@ class CarlaStarDataset(BaseStarDataset):
             imgs, poses, frames = self.load_imgs_poses(args, split)
 
         self.gt_vehicle_poses = self.get_gt_vehicle_poses(args)
-        self.gt_relative_poses = self.load_gt_relative_poses()
+        self.gt_relative_poses = self.load_gt_relative_poses(args)
         H, W, focal = self.load_intrinsics(args)
         self.H = int(H)
         self.W = int(W)
@@ -169,15 +169,20 @@ class CarlaStarDataset(BaseStarDataset):
         return poses
     
 
-    def load_gt_relative_poses(self):
+    def load_gt_relative_poses(self, args):
         poses = []
-        pose0_inv = None
+        pose0 = None
         for i,pose in enumerate(self.gt_vehicle_poses):
+            if args.scale_factor > 0:
+                pose[:3,3] *= args.scale_factor
             if i == 0:
-                pose0_inv = invert_transformation(pose)
+                #pose0_inv = invert_transformation(pose)
+                pose0 = pose
                 poses.append(np.eye(4, dtype=np.float32))
             else:
-                posei_0 = pose @ pose0_inv
+                pose_inv = invert_transformation(pose)
+                #posei_0 = pose_inv @ pose0.numpy()
+                posei_0 = pose0.numpy() @ pose_inv
                 # for pytorch3d 4x4 format
                 posei_0_ = np.eye(4, dtype=np.float32)
                 posei_0_[:3,:3] = posei_0[:3,:3]

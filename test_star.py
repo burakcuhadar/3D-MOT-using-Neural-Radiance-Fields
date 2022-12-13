@@ -23,6 +23,7 @@ def test():
 
     star_model = STaR(num_frames=15, args=args) # TODO num_frames from args
     star_model.to(device)
+    star_model.eval()
 
     if args.online_ckpt_path is None:
         print("No checkpoint given, cannot test star")

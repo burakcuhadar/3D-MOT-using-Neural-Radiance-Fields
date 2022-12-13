@@ -1,6 +1,6 @@
 expname = carla_star
 basedir = ./logs
-datadir = ./data/carla_dynamic
+datadir = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic
 dataset_type = carla_star
 
 # to load appearance init ckpt
@@ -17,9 +17,12 @@ appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radian
 
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_6ymr4f6n/online_epoch_250.ckpt
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2cay9q5d/online_epoch_500.ckpt
+#online_ckpt_path = /usr/stud/cuhadar/storage/user/star_manual_pose_update/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_9l9vemcy/online_epoch_825.ckpt
 
 # For testing 
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_ijv58ml9/online_epoch_279.ckpt
+#lr=1000 minus update
+online_ckpt_path = /usr/stud/cuhadar/storage/user/star_manual_pose_update/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_320xuimg/online_epoch_1475.ckpt
 
 # to train appearnace init
 #skip_appearance_init = False
@@ -28,7 +31,7 @@ appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radian
 use_viewdirs = True
 
 lrate = 5e-4
-lrate_pose = 1e-5
+lrate_pose = 1e-3
 #lrate_decay_steps = [15, 35, 55, 75, 300]
 lrate_decay = 1000
 lrate_decay_rate = 0.5

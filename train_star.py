@@ -44,10 +44,54 @@ def get_pose_metrics(poses, gt_poses):
     translation = poses[:, :3]
     rotation = poses[:, 3:]
     
-    trans_error = torch.mean(torch.sum((translation - gt_translation)**2, axis=1).sqrt())
-    rot_error = torch.sum(torch.abs(rotation - gt_rotation), axis=1).mean()
+    trans_error = torch.mean(torch.sum((translation - gt_translation)**2, dim=1).sqrt())
+    rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
     return trans_error, rot_error
     
+
+def compute_pose_grad(transformed_pts_coarse, transformed_pts_fine, transformed_pts_grad):
+    """
+    transformed_pts: (N_rays*N_samples, 3)
+    """
+    #print(transformed_pts.grad)
+    with torch.no_grad():
+        '''
+        transformed_pts_coarse_flat = torch.reshape(transformed_pts_coarse, (-1, 3))
+        transformed_pts_fine_flat = torch.reshape(transformed_pts_fine, (-1, 3))
+        transformed_pts_flat = torch.cat([transformed_pts_coarse_flat, transformed_pts_fine_flat], dim=0)
+        '''
+        transformed_pts_flat = torch.reshape(transformed_pts_fine, (-1,3))    
+        transformed_pts_grad_flat = torch.reshape(transformed_pts_grad, (-1, 3))
+
+        d_epsilon = torch.zeros((transformed_pts_flat.shape[0], 3, 6), device=device)
+        d_epsilon[:, 0, 0] = 1.
+        d_epsilon[:, 1, 1] = 1.
+        d_epsilon[:, 2, 2] = 1.
+        d_epsilon[:, 0, 4] = transformed_pts_flat[:,2]
+        d_epsilon[:, 0, 5] = -transformed_pts_flat[:,1]
+        d_epsilon[:, 1, 3] = -transformed_pts_flat[:,2]
+        d_epsilon[:, 1, 5] = transformed_pts_flat[:,0]
+        d_epsilon[:, 2, 3] = transformed_pts_flat[:,1]
+        d_epsilon[:, 2, 4] = -transformed_pts_flat[:,0]
+
+        #transformed_pts.grad.data.zero_()
+        #transformed_pts_grad_flat_norm = transformed_pts_grad_flat.norm(dim=1)
+        #transformed_pts_grad_flat = transformed_pts_grad_flat[transformed_pts_grad_flat_norm > 1e-5]
+        #d_epsilon = d_epsilon[transformed_pts_grad_flat_norm > 1e-5]
+        #print('transformed pts avg grad norm', transformed_pts_grad_flat.norm(dim=1).mean())
+        #print('transformed pts max grad norm', torch.max(transformed_pts_grad_flat.norm(dim=1)))
+        #print('transformed pts min grad norm', torch.min(transformed_pts_grad_flat.norm(dim=1)))
+        #print('num greater than 1e-5', transformed_pts_grad_flat_norm[transformed_pts_grad_flat_norm > 1e-5].numel())
+
+        pose_grad = torch.einsum('na,nab->nb', transformed_pts_grad_flat, d_epsilon)
+        pose_grad = torch.mean(pose_grad, axis=0)
+        
+        #print('pose grad norm', pose_grad.norm())
+        
+
+
+
+    return pose_grad
 
 
 
@@ -293,14 +337,14 @@ def train_online(star_model, args, logger_wandb):
 
     # Create optimizer
     optimizer = torch.optim.Adam(star_model.get_nerf_params(), lr=args.lrate, betas=(0.9, 0.999))
-    pose_optimizer = torch.optim.SGD([star_model.poses_], lr=args.lrate_pose)
+    #pose_optimizer = torch.optim.SGD([star_model.poses_], lr=args.lrate_pose)
 
     scheduler = LambdaLR(optimizer, lr_lambda=get_scheduler_online(args))
 
     # Load checkpoint for online training
     step_restored = 0
     if args.online_ckpt_path is not None:
-        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, pose_optimizer, scheduler) 
+        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
         #step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
         print("Resuming online training from step:", step_restored)
     else:
@@ -361,10 +405,9 @@ def train_online(star_model, args, logger_wandb):
             pts, viewdirs, z_vals, rays_o, rays_d, target, frames = batch
 
             optimizer.zero_grad()
-            pose_optimizer.zero_grad()
 
-            rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs,
-                z_vals, rays_o, rays_d, frames=frames, retraw=True, N_importance=args.N_importance)
+            rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
+                frames=frames, retraw=True, N_importance=args.N_importance)
             
 
             # Compute loss
@@ -377,8 +420,12 @@ def train_online(star_model, args, logger_wandb):
             
             loss.backward()
 
+            if frames[0,0] != 0:
+                with torch.no_grad():
+                    pose_grad = compute_pose_grad(extras['transformed_pts0'], extras['transformed_pts'], star_model.get_poses_grad())
+                    star_model.poses_[frames[0,0]-1, :] -= args.lrate_pose * pose_grad #TODO -= or += ?
+            
             optimizer.step()
-            pose_optimizer.step()
             
             train_fine_loss_running += img_loss.item()
             train_loss_running += loss.item()
@@ -397,8 +444,8 @@ def train_online(star_model, args, logger_wandb):
             avg_psnr0 = train_psnr0_running / len(train_online_dataloader)
             tqdm.write(f'Epoch: {step}, Avg Fine Loss: {avg_fine_loss}, Avg Loss: {avg_loss}, PSNR: {avg_psnr}')
             with torch.no_grad():
-                trans_error, rot_error = get_pose_metrics(star_model.get_poses()[1:,...], 
-                    train_online_dataset.gt_relative_poses.to(device)[1:,...])
+                trans_error, rot_error = get_pose_metrics(star_model.get_poses()[1:k,...], 
+                    train_online_dataset.gt_relative_poses.to(device)[1:k,...])
             logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None, trans_error, rot_error)        
             tqdm.write(f'Poses: {star_model.get_poses()}')
             

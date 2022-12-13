@@ -1,4 +1,5 @@
 import wandb
+import os
 
 
 class LoggerWandb():

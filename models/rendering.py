@@ -99,14 +99,20 @@ def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
         rgb_map, disp_map, acc_map, weights, depth_map = star_model(pts, viewdirs, z_vals, rays_d, frames, 
             is_coarse=True)
     else:
-        rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
-            viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose)
+        if frames is not None:
+            rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic, transformed_pts = \
+                star_model(pts, viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose)
+        else:
+            rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
+                viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose)
 
     # Hierarchical volume sampling
     if N_importance > 0:
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
         if not appearance_init:
             rgb_map_static0, rgb_map_dynamic0, entropy0 = rgb_map_static, rgb_map_dynamic, entropy
+            if frames is not None:
+                transformed_pts0 = transformed_pts
 
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
         z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(not star_model.training))
@@ -119,13 +125,19 @@ def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
             rgb_map, disp_map, acc_map, weights, depth_map = star_model(pts, viewdirs, z_vals, rays_d, frames, 
                 is_coarse=False)
         else:
-            rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
-                viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose)
-        
+            if frames is not None:
+                rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic, transformed_pts = \
+                    star_model(pts, viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose)
+            else:
+                rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
+                    viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose)
+            
     extras = {}
     if not appearance_init:
         extras['rgb_map_dynamic'] = rgb_map_dynamic
         extras['rgb_map_static'] = rgb_map_static
+        if frames is not None:
+            extras['transformed_pts'] = transformed_pts
     if N_importance > 0:
         extras['rgb0'] = rgb_map_0
         extras['disp0'] = disp_map_0
@@ -135,6 +147,8 @@ def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
             extras['rgb_map_static0'] = rgb_map_static0
             extras['rgb_map_dynamic0'] = rgb_map_dynamic0
             extras['entropy0'] = entropy0
+            if frames is not None:
+                extras['transformed_pts0'] = transformed_pts0
 
     if appearance_init:
         return rgb_map, disp_map, acc_map, extras
