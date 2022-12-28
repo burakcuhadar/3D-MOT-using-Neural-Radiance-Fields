@@ -27,7 +27,7 @@ class STaR(nn.Module):
 
         # At time 0, the pose is defined to be identity, therefore we don't optimize it, hence num_frames-1
         self.poses_ = nn.Parameter(torch.zeros((num_frames-1, 6)), requires_grad=True)
-        self.poses_grad = []
+        #self.poses_grad = [] #TODO
 
     def get_poses(self):
         pose0 = torch.zeros((1, 6), requires_grad=False, device=self.poses_.device)
@@ -145,14 +145,16 @@ class STaR(nn.Module):
         elif self.gt_poses is not None:
             pose_matrices = self.gt_poses[frames,...] # [N_rays, 1, 4, 4]
         else:
-            pose = self.get_poses()[frames][:,0,:] # [N_rays, 3]
-            #pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
-            pose_matrices_ = se3_exp_map(pose)
-            pose_matrices = torch.zeros((N_rays, 4, 4), device=pose.device)
-            pose_matrices[:, :3, :3] = pose_matrices_[:, :3, :3]
-            pose_matrices[:, :3, 3] = pose_matrices_[:, 3, :3]
-            pose_matrices[:, 3, 3] = 1.
-            pose_matrices = pose_matrices[:, None, ...]
+            # pose = self.get_poses()[frames][:,0,:] # [N_rays, 3]
+            # pose_matrices_ = se3_exp_map(pose)
+            # pose_matrices = torch.zeros((N_rays, 4, 4), device=pose.device)
+            # pose_matrices[:, :3, :3] = pose_matrices_[:, :3, :3]
+            # pose_matrices[:, :3, 3] = pose_matrices_[:, 3, :3]
+            # pose_matrices[:, 3, 3] = 1.
+            # pose_matrices = pose_matrices[:, None, ...]
+            pose = self.get_poses()[frames,...]
+            pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
+            
 
 
         pose_matrices_pts = pose_matrices.expand((N_rays, N_samples, 4, 4)) # [N_rays, N_samples, 4, 4]
@@ -167,8 +169,8 @@ class STaR(nn.Module):
         #pts_dynamic.retain_grad()
         #print(pts_dynamic.grad)
         #pts_dynamic.register_hook(print)
-        if self.training:
-            pts_dynamic.register_hook(lambda grad: self.poses_grad.append(grad))
+        # if self.training:
+        #     pts_dynamic.register_hook(lambda grad: self.poses_grad.append(grad))
 
         viewdirs_dynamic = torch.einsum('nab,nb->na', pose_matrices[:, 0, :3, :3], viewdirs)
 

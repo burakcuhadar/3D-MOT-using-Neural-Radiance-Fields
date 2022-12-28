@@ -5,8 +5,29 @@ import numpy as np
 
 from models.embedder import get_embedder
 from models.rendering import raw2outputs
+from models.resnet import ResnetFC
 
+'''
+class ResBlock(nn.Module):
+    def __init__(self, W):
+        super(ResBlock, self).__init__()
+        self.layer1 = nn.Linear(W, W)
+        self.bn1 = nn.BatchNorm1d(W)
+        self.layer2 = nn.Linear(W, W)
+        self.bn2 = nn.BatchNorm1d(W)
+        self.relu = nn.ReLU()
 
+    def forward(self, x):
+        residual = x
+        out = self.layer1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.layer2(out)
+        out = self.bn2(out)
+        out += residual
+        out = self.relu(out)
+        return out
+'''
 
 # Model
 class NeRF(nn.Module):
@@ -25,18 +46,18 @@ class NeRF(nn.Module):
         # Used only when not using viewdirs TODO is 5th dim ever used?
         output_ch = 5 if args.N_importance > 0 else 4
     
-        skips = [4]
-
+        
         self.embed_fn = embed_fn
         self.embeddirs_fn = embeddirs_fn
         self.input_ch = input_ch
         self.input_ch_views = input_ch_views
-        self.skips = skips
         self.use_viewdirs = args.use_viewdirs
         
-        self.pts_linears = nn.ModuleList(
-            [nn.Linear(input_ch, W)] + \
-            [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch, W) for i in range(D-1)])
+        '''self.pts_linears = nn.ModuleList(
+            [nn.Linear(input_ch, W), nn.ReLU()] + \
+            [ResBlock(W) for i in range(D//2)])'''
+        self.pts_net = ResnetFC(input_ch, d_out=W, n_blocks=D//2, d_hidden=W)
+        
         
         ### Implementation according to the official code release:
         ### (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
@@ -58,12 +79,22 @@ class NeRF(nn.Module):
         self.white_bkgd = args.white_bkgd
 
         # Weight Initialization
-        for layer in self.pts_linears:
-            torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-            torch.nn.init.zeros_(layer.bias)
+        '''for i, layer in enumerate(self.pts_linears):
+            if i == 0:
+                torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
+                torch.nn.init.zeros_(layer.bias)
+            elif i > 1:
+                torch.nn.init.kaiming_normal_(layer.layer1.weight, nonlinearity='relu')
+                torch.nn.init.zeros_(layer.layer1.bias)
+                torch.nn.init.kaiming_normal_(layer.layer2.weight, nonlinearity='relu')
+                torch.nn.init.zeros_(layer.layer2.bias)'''
+
         for layer in self.views_linears:
             torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
             torch.nn.init.zeros_(layer.bias)
+        torch.nn.init.kaiming_normal_(self.alpha_linear.weight, nonlinearity='relu')
+        torch.nn.init.zeros_(self.alpha_linear.bias)
+        torch.nn.init.xavier_uniform_(self.rgb_linear.weight)
 
     def forward(self, pts, viewdirs, z_vals=None, rays_d=None):
         """
@@ -91,12 +122,10 @@ class NeRF(nn.Module):
 
             # 2. Forward pass embedded inputs through MLP to get rgb and density
             h = embedded_pts
-            for i, l in enumerate(self.pts_linears):
-                h = self.pts_linears[i](h)
-                h = F.relu(h)
-                if i in self.skips:
-                    h = torch.cat([embedded_pts, h], -1)
-
+            '''for i, l in enumerate(self.pts_linears):
+                h = self.pts_linears[i](h)'''
+            h = self.pts_net(h)
+                
             if self.use_viewdirs:
                 raw_alpha = self.alpha_linear(h)
                 feature = self.feature_linear(h)

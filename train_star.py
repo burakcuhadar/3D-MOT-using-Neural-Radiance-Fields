@@ -6,6 +6,7 @@ from utils.logging import LoggerWandb
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from models.star import STaR
 from tqdm import tqdm, trange
+import wandb
 
 import matplotlib.pyplot as plt
 
@@ -48,18 +49,18 @@ def get_pose_metrics(poses, gt_poses):
     rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
     return trans_error, rot_error
     
-
+'''
 def compute_pose_grad(transformed_pts_coarse, transformed_pts_fine, transformed_pts_grad):
     """
     transformed_pts: (N_rays*N_samples, 3)
     """
     #print(transformed_pts.grad)
     with torch.no_grad():
-        '''
+        """
         transformed_pts_coarse_flat = torch.reshape(transformed_pts_coarse, (-1, 3))
         transformed_pts_fine_flat = torch.reshape(transformed_pts_fine, (-1, 3))
         transformed_pts_flat = torch.cat([transformed_pts_coarse_flat, transformed_pts_fine_flat], dim=0)
-        '''
+        """
         transformed_pts_flat = torch.reshape(transformed_pts_fine, (-1,3))    
         transformed_pts_grad_flat = torch.reshape(transformed_pts_grad, (-1, 3))
 
@@ -92,7 +93,7 @@ def compute_pose_grad(transformed_pts_coarse, transformed_pts_fine, transformed_
 
 
     return pose_grad
-
+'''
 
 
 def val_step(val_dataset, val_dataloader, train_render_dataset, train_render_dataloader, star_model, args, step, logger):
@@ -337,14 +338,14 @@ def train_online(star_model, args, logger_wandb):
 
     # Create optimizer
     optimizer = torch.optim.Adam(star_model.get_nerf_params(), lr=args.lrate, betas=(0.9, 0.999))
-    #pose_optimizer = torch.optim.SGD([star_model.poses_], lr=args.lrate_pose)
+    pose_optimizer = torch.optim.SGD([star_model.poses_], lr=args.lrate_pose)
 
     scheduler = LambdaLR(optimizer, lr_lambda=get_scheduler_online(args))
 
     # Load checkpoint for online training
     step_restored = 0
     if args.online_ckpt_path is not None:
-        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
+        step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler, pose_optimizer=pose_optimizer) 
         #step_restored, k = load_ckpt_online(args.online_ckpt_path, star_model, optimizer, scheduler) 
         print("Resuming online training from step:", step_restored)
     else:
@@ -405,6 +406,7 @@ def train_online(star_model, args, logger_wandb):
             pts, viewdirs, z_vals, rays_o, rays_d, target, frames = batch
 
             optimizer.zero_grad()
+            pose_optimizer.zero_grad()
 
             rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
                 frames=frames, retraw=True, N_importance=args.N_importance)
@@ -420,12 +422,15 @@ def train_online(star_model, args, logger_wandb):
             
             loss.backward()
 
+            '''
             if frames[0,0] != 0:
                 with torch.no_grad():
                     pose_grad = compute_pose_grad(extras['transformed_pts0'], extras['transformed_pts'], star_model.get_poses_grad())
-                    star_model.poses_[frames[0,0]-1, :] -= args.lrate_pose * pose_grad #TODO -= or += ?
-            
+                    star_model.poses_[frames[0,0]-1, :] += args.lrate_pose * pose_grad 
+            '''
+
             optimizer.step()
+            pose_optimizer.step()
             
             train_fine_loss_running += img_loss.item()
             train_loss_running += loss.item()
@@ -446,14 +451,15 @@ def train_online(star_model, args, logger_wandb):
             with torch.no_grad():
                 trans_error, rot_error = get_pose_metrics(star_model.get_poses()[1:k,...], 
                     train_online_dataset.gt_relative_poses.to(device)[1:k,...])
-            logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None, trans_error, rot_error)        
+            #logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None, trans_error, rot_error, pose_grad.norm().item())        
+            logger_wandb.log_train_online(step, avg_fine_loss, avg_psnr, avg_psnr0 if avg_psnr0 != 0 else None, trans_error, rot_error)
             tqdm.write(f'Poses: {star_model.get_poses()}')
             
  
         # Save checkpoint
         if step % args.epoch_ckpt == 0:
             path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
-            save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k)
+            save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k, pose_optimizer=pose_optimizer)
 
         # Validation step, render one random view from validation set
         if step % args.epoch_val == 0:
@@ -486,6 +492,8 @@ def train():
     #Create model
     star_model = STaR(num_frames=15, args=args) # TODO num_frames from args
     star_model.to(device)
+
+    wandb.watch(star_model, log='all')
 
     if args.skip_appearance_init:
         if args.appearance_ckpt_path is not None:

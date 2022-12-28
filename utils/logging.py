@@ -21,9 +21,10 @@ class LoggerWandb():
         self.run.log({"loss appearance": loss, "psnr appearance": psnr, "psnr0 appearance": psnr0, "epoch": epoch})
 
     # For Star, online training
-    def log_train_online(self, epoch, loss, psnr, psnr0=None, trans_error=None, rot_error=None):
+    def log_train_online(self, epoch, loss, psnr, psnr0=None, trans_error=None, rot_error=None, pose_grad_avg_norm=None):
         self.run.log({"fine loss online": loss, "psnr online": psnr, "psnr0 online": psnr0, 
-            "translation error": trans_error, "rotation error": rot_error, "epoch": epoch})
+            "translation error": trans_error, "rotation error": rot_error, 
+            "pose grad avg norm": pose_grad_avg_norm, "epoch": epoch})
 
     # For vanilla NeRF
     def log_val(self, epoch, loss, psnr, rgb, gt_rgb, disp, acc, rgb0=None, disp0=None, z_std=None):
