@@ -240,6 +240,8 @@ def train_appearance_init(star_model, args, logger_wandb):
 
     m1 = args.appearance_init_thres
 
+    scaler = torch.cuda.amp.GradScaler()
+
     for step in tqdm(range(step_restored+1, epochs+1), desc="Appearance Initialization Training epochs"):
 
         if step != step_restored+1 and train_fine_loss_running / len(train_appearance_dataloader) < m1:
@@ -258,27 +260,31 @@ def train_appearance_init(star_model, args, logger_wandb):
         for batch in tqdm(train_appearance_dataloader, leave=False, desc=f"Epoch {step}"):
             
             train_appearance_dataset.move_batch_to_device(batch, device)
-            
             pts, viewdirs, z_vals, rays_o, rays_d, target, _ = batch
-            
-            optimizer.zero_grad()
 
-            rgb, disp, acc, extras = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
-                retraw=True, N_importance=args.N_importance, appearance_init=True)
-            
-            # Compute loss
-            img_loss = img2mse(rgb, target)
-            loss = img_loss
-            psnr = mse2psnr(img_loss)
-            if 'rgb0' in extras:
-                img_loss0 = img2mse(extras['rgb0'], target)
-                loss = loss + img_loss0
-                psnr0 = mse2psnr(img_loss0)
-            #loss += args.entropy_weight * entropy        #TODO try with entropy
+            optimizer.zero_grad(set_to_none=True)
 
-            loss.backward()
-            optimizer.step()
-            
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                rgb, disp, acc, extras = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
+                    retraw=True, N_importance=args.N_importance, appearance_init=True)
+                
+                # Compute loss
+                img_loss = img2mse(rgb, target)
+                loss = img_loss
+                psnr = mse2psnr(img_loss)
+                if 'rgb0' in extras:
+                    img_loss0 = img2mse(extras['rgb0'], target)
+                    loss = loss + img_loss0
+                    psnr0 = mse2psnr(img_loss0)
+                #loss += args.entropy_weight * entropy        #TODO try with entropy
+
+            #loss.backward()
+            scaler.scale(loss).backward()
+
+            #optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
+
             train_fine_loss_running += img_loss.item()
             train_loss_running += loss.item()
             train_psnr_running += psnr.item()
@@ -365,6 +371,8 @@ def train_online(star_model, args, logger_wandb):
 
     m2 = args.online_thres
 
+    scaler = torch.cuda.amp.GradScaler()
+
     for step in tqdm(range(step_restored+1, epochs+1), desc="Online Training epochs"):
 
         if step != step_restored+1 and train_fine_loss_running / len(train_online_dataloader) < m2:
@@ -402,25 +410,25 @@ def train_online(star_model, args, logger_wandb):
         for batch in tqdm(train_online_dataloader, leave=False, desc=f"Epoch {step}"):
             
             train_online_dataset.move_batch_to_device(batch, device)
-            
             pts, viewdirs, z_vals, rays_o, rays_d, target, frames = batch
 
-            optimizer.zero_grad()
-            pose_optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
+            pose_optimizer.zero_grad(set_to_none=True)
 
-            rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-                frames=frames, retraw=True, N_importance=args.N_importance)
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
+                    frames=frames, retraw=True, N_importance=args.N_importance)
             
-
-            # Compute loss
-            img_loss = img2mse(rgb, target)
-            psnr = mse2psnr(img_loss)
-            img_loss0 = img2mse(extras['rgb0'], target)
-            loss = img_loss + img_loss0
-            psnr0 = mse2psnr(img_loss0)
-            loss += args.entropy_weight * (entropy + extras['entropy0']) #TODO entropy!
+                # Compute loss
+                img_loss = img2mse(rgb, target)
+                psnr = mse2psnr(img_loss)
+                img_loss0 = img2mse(extras['rgb0'], target)
+                loss = img_loss + img_loss0
+                psnr0 = mse2psnr(img_loss0)
+                loss += args.entropy_weight * (entropy + extras['entropy0']) #TODO entropy!
             
-            loss.backward()
+            #loss.backward()
+            scaler.scale(loss).backward()
 
             '''
             if frames[0,0] != 0:
@@ -429,9 +437,12 @@ def train_online(star_model, args, logger_wandb):
                     star_model.poses_[frames[0,0]-1, :] += args.lrate_pose * pose_grad 
             '''
 
-            optimizer.step()
-            pose_optimizer.step()
-            
+            #optimizer.step()
+            #pose_optimizer.step()
+            scaler.step(optimizer)
+            scaler.step(pose_optimizer)
+            scaler.update()
+
             train_fine_loss_running += img_loss.item()
             train_loss_running += loss.item()
             train_psnr_running += psnr.item()

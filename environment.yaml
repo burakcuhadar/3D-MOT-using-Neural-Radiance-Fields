@@ -7,10 +7,10 @@ channels:
 dependencies:
     - python=3.9
     - pip
-    - numpy
     - pytorch=1.12.0
     - cudatoolkit=11.6
     - torchvision>=0.9.1
+    - numpy 
     - pytorch3d
     - scipy
     - pip:

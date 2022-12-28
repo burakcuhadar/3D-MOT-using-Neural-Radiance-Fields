@@ -1,4 +1,4 @@
-expname = carla_star
+expname = carla_star_resnetfast
 basedir = ./logs
 datadir = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic
 dataset_type = carla_star
