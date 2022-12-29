@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from numpy.random import default_rng
 from glob import glob
 import imageio 
 import torch
@@ -191,9 +192,19 @@ class CarlaStarDataset(BaseStarDataset):
 
         poses = np.stack(poses, axis=0)
         poses = torch.from_numpy(poses) # num_frames, 4, 4
+        with torch.no_grad():
+            self.gt_relative_poses_matrices = poses.clone()
         poses = se3_log_map(poses) # num_frames, 6
         
         return poses
+
+    def get_noisy_gt_relative_poses(self):        
+        print('gt relative poses', self.gt_relative_poses)
+        noise = torch.randn((self.gt_relative_poses.shape[0]-1, 6), dtype=torch.float32) / 100.
+        noisy_poses = torch.zeros_like(self.gt_relative_poses)
+        noisy_poses += self.gt_relative_poses
+        noisy_poses[1:,:] += noise
+        return noisy_poses
 
 
     def load_imgs_poses(self, args, split):
