@@ -1,4 +1,4 @@
-expname = carla_star_resnetfast
+expname = carla_star_resnet
 basedir = ./logs
 datadir = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic
 dataset_type = carla_star
@@ -68,8 +68,8 @@ no_batching = True
 epochs_appearance = 5000
 epochs_online = 50000
 epoch_ckpt = 50
-epoch_print = 5
-epoch_val = 50
+epoch_print = 1
+epoch_val = 10
 
 appearance_init_thres = 1e-3
 online_thres = 9e-4

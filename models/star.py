@@ -26,7 +26,7 @@ class STaR(nn.Module):
         self.dynamic_fine_nerf   = NeRF(D=args.netdepth_fine, W=args.netwidth_fine, args=args)
 
         # At time 0, the pose is defined to be identity, therefore we don't optimize it, hence num_frames-1
-        self.poses_ = nn.Parameter(torch.zeros((num_frames-1, 6)), requires_grad=True)
+        self.poses_ = nn.Parameter(torch.zeros((num_frames-1, 6)), requires_grad=True) 
         #self.poses_grad = [] #TODO
 
     def get_poses(self):

@@ -127,7 +127,7 @@ def val_step(val_dataset, val_dataloader, train_render_dataset, train_render_dat
     acc = to8b(torch.reshape(acc, (val_H, val_W, 1)).cpu().detach().numpy())
     target = to8b(torch.reshape(target, (val_H, val_W, 3)).cpu().detach().numpy())
     
-    logger.log_val_online(step, val_mse, psnr, rgb, target, rgb_static, rgb_dynamic, disp, acc, rgb0, 
+    logger.log_val_online(step, val_mse.item(), psnr.item(), rgb, target, rgb_static, rgb_dynamic, disp, acc, rgb0, 
         rgb_static0, rgb_dynamic0, disp0, z_std)
 
     # render one random view with random vehicle pose from train dataset
@@ -337,6 +337,7 @@ def train_appearance_init(star_model, args, logger_wandb):
 
     star_model.poses_.requires_grad = True
 
+load_gt_poses = True #TODO!!!!!!!!!!!
 
 def train_online(star_model, args, logger_wandb):
 
@@ -362,8 +363,19 @@ def train_online(star_model, args, logger_wandb):
     dataset_class = dataset_dict[args.dataset_type]
     train_online_dataset, train_online_dataloader, val_online_dataset, val_online_dataloader, train_render_dataset, \
         train_render_dataloader = setup_dataset(dataset_class, args, k)
+    
+    ''' noisy pose initialization
+    if step_restored == 0:
+        print('poses before assigning', star_model.poses_)
+        with torch.no_grad():
+            star_model.poses_ += train_online_dataset.get_noisy_gt_relative_poses()[1:,...].to(device)
+    '''
 
-    #star_model.gt_poses = train_online_dataset.get_gt_vehicle_poses(args).to(device)
+    print('starting online training with these poses: ', star_model.get_poses())
+
+    if load_gt_poses:
+        with torch.no_grad():
+            star_model.gt_poses = train_online_dataset.gt_relative_poses_matrices.clone().to(device)
 
     print('use_batching', train_online_dataset.use_batching)
     print('number of batches', len(train_online_dataloader))
@@ -371,7 +383,7 @@ def train_online(star_model, args, logger_wandb):
 
     m2 = args.online_thres
 
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.cuda.amp.GradScaler(enabled=False) #TODO enabled=True
 
     for step in tqdm(range(step_restored+1, epochs+1), desc="Online Training epochs"):
 
@@ -413,12 +425,13 @@ def train_online(star_model, args, logger_wandb):
             pts, viewdirs, z_vals, rays_o, rays_d, target, frames = batch
 
             optimizer.zero_grad(set_to_none=True)
-            pose_optimizer.zero_grad(set_to_none=True)
+            if not load_gt_poses:
+                pose_optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=False): #TODO enabled=true
                 rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
                     frames=frames, retraw=True, N_importance=args.N_importance)
-            
+
                 # Compute loss
                 img_loss = img2mse(rgb, target)
                 psnr = mse2psnr(img_loss)
@@ -426,7 +439,7 @@ def train_online(star_model, args, logger_wandb):
                 loss = img_loss + img_loss0
                 psnr0 = mse2psnr(img_loss0)
                 loss += args.entropy_weight * (entropy + extras['entropy0']) #TODO entropy!
-            
+        
             #loss.backward()
             scaler.scale(loss).backward()
 
@@ -438,16 +451,23 @@ def train_online(star_model, args, logger_wandb):
             '''
 
             #optimizer.step()
-            #pose_optimizer.step()
             scaler.step(optimizer)
-            scaler.step(pose_optimizer)
+            if not load_gt_poses:
+                #pose_optimizer.step()
+                scaler.step(pose_optimizer)
+            
             scaler.update()
 
-            train_fine_loss_running += img_loss.item()
-            train_loss_running += loss.item()
-            train_psnr_running += psnr.item()
+            train_fine_loss_running += img_loss.float().item()
+            train_loss_running += loss.float().item()
+            train_psnr_running += psnr.float().item()
             if 'rgb0' in extras:
-                train_psnr0_running += psnr0.item()
+                train_psnr0_running += psnr0.float().item()
+
+
+        '''if load_gt_poses:
+            with torch.no_grad():
+                star_model.gt_poses = train_online_dataset.gt_relative_poses_matrices.clone().to(device)'''
             
         
         scheduler.step()
@@ -518,7 +538,6 @@ def train():
         train_appearance_init(star_model, args, logger_wandb)
         print("Appearance initialization finished.")
 
-    print(star_model.get_poses())
 
     print("Starting online training...")
     
