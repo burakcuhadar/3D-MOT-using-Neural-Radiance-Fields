@@ -99,7 +99,7 @@ class CarlaStarDataset(BaseStarDataset):
             imgs = None
             frames = None
         else:
-            imgs, poses, frames = self.load_imgs_poses(args, split)
+            imgs, semantic_imgs, poses, frames = self.load_imgs_poses(args, split)
 
         self.gt_vehicle_poses = self.get_gt_vehicle_poses(args)
         self.gt_relative_poses = self.load_gt_relative_poses(args)
@@ -109,6 +109,7 @@ class CarlaStarDataset(BaseStarDataset):
         self.focal = focal
         
         self.imgs = imgs
+        self.semantic_imgs = semantic_imgs
         self.poses = poses
         self.frames = frames
         self.near = 3. 
@@ -171,19 +172,25 @@ class CarlaStarDataset(BaseStarDataset):
     
 
     def load_gt_relative_poses(self, args):
+        pose_files = sorted(glob(args.datadir + '/poses/*.npy'), key=natural_keys)
+
         poses = []
+        poses_matrices = []
+
         pose0 = None
-        for i,pose in enumerate(self.gt_vehicle_poses):
+        for i,f in enumerate(pose_files):
+            pose = from_ue4_to_nerf(np.load(f))
             if args.scale_factor > 0:
                 pose[:3,3] *= args.scale_factor
             if i == 0:
                 #pose0_inv = invert_transformation(pose)
-                pose0 = pose
+                pose0 = pose.astype(np.float32)
                 poses.append(np.eye(4, dtype=np.float32))
             else:
                 pose_inv = invert_transformation(pose)
                 #posei_0 = pose_inv @ pose0.numpy()
-                posei_0 = pose0.numpy() @ pose_inv
+                posei_0 = pose0 @ pose_inv
+                poses_matrices.append(posei_0)
                 # for pytorch3d 4x4 format
                 posei_0_ = np.eye(4, dtype=np.float32)
                 posei_0_[:3,:3] = posei_0[:3,:3]
@@ -193,14 +200,15 @@ class CarlaStarDataset(BaseStarDataset):
         poses = np.stack(poses, axis=0)
         poses = torch.from_numpy(poses) # num_frames, 4, 4
         with torch.no_grad():
-            self.gt_relative_poses_matrices = poses.clone()
+            poses_matrices = np.stack(poses_matrices, axis=0)
+            self.gt_relative_poses_matrices = torch.from_numpy(poses_matrices)
         poses = se3_log_map(poses) # num_frames, 6
         
         return poses
 
     def get_noisy_gt_relative_poses(self):        
         print('gt relative poses', self.gt_relative_poses)
-        noise = torch.randn((self.gt_relative_poses.shape[0]-1, 6), dtype=torch.float32) / 100.
+        noise = torch.randn((self.gt_relative_poses.shape[0]-1, 6), dtype=torch.float32) / 10000.
         noisy_poses = torch.zeros_like(self.gt_relative_poses)
         noisy_poses += self.gt_relative_poses
         noisy_poses[1:,:] += noise
@@ -214,7 +222,8 @@ class CarlaStarDataset(BaseStarDataset):
 
         imgs = []
         poses = []
-        
+        semantic_imgs = []
+
         for i, cam in enumerate(cameras):
             if self.split == 'train_appearance' or self.split == 'train_online' or self.split == 'train_render':
                 if i >= 50:
@@ -225,7 +234,21 @@ class CarlaStarDataset(BaseStarDataset):
             print(cam, 'goes to', self.split)
             #print(cam, ' extrinsics:', extrinsics[i])
 
-            imgpaths = sorted(glob(cam + '*.png'), key=natural_keys)[:self.num_frames]
+            if self.split == 'train_appearance' or self.split == 'train_online' or self.split == 'train_render':
+                #imgpaths = sorted(glob(cam + '*.png'), key=natural_keys)[:self.num_frames*2]
+                imgpaths = []
+                semantic_imgpaths = []
+                for path in sorted(glob(cam + '*.png'), key=natural_keys)[:self.num_frames*2]: # *2 since there are also semantic images
+                    if path.endswith('_semantic.png'):
+                        semantic_imgpaths.append(path)
+                    else:
+                        imgpaths.append(path)
+                semantic_imgs.append([imageio.imread(imgpath) for imgpath in semantic_imgpaths])
+
+            elif self.split == 'val_appearance' or self.split == 'val_online':
+                imgpaths = sorted(glob(cam + '*.png'), key=natural_keys)[:self.num_frames]
+
+
             # if self.split == 'train_appearance' or self.split == 'val_appearance':  
             #     # The first frame is used for appearance init
             #     imgpaths = imgpaths[:1]
@@ -241,9 +264,15 @@ class CarlaStarDataset(BaseStarDataset):
         else:
             frames = np.arange(imgs.shape[1])[None,:].repeat(imgs.shape[0], axis=0) # [view_num, frame_num]
 
+        if self.split == 'train_appearance' or self.split == 'train_online' or self.split == 'train_render':
+            semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[...,0] # [view_num, frame_num, H, W]
+        else:
+            semantic_imgs = None
 
-        return imgs, poses, frames
+
+        return imgs, semantic_imgs, poses, frames
         
+
 
 
 def atoi(text):

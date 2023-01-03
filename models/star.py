@@ -2,7 +2,7 @@ from importlib.metadata import requires
 import torch
 import torch.nn as nn
 
-from lietorch import SE3
+from lietorch import SO3, SE3
 from pytorch3d.transforms import se3_exp_map
 
 from models.nerf import NeRF
@@ -34,14 +34,14 @@ class STaR(nn.Module):
         poses = torch.cat((pose0, self.poses_), dim=0)
         return poses
 
-    def get_poses_grad(self):
+    '''def get_poses_grad(self):
         with torch.no_grad():
             #for p in self.poses_grad:
             #    print(p.shape)
             #poses_grad = torch.cat(self.poses_grad, axis=0)
             poses_grad = self.poses_grad[0]
             self.poses_grad = []
-        return poses_grad
+        return poses_grad'''
 
 
     def get_nerf_params(self):
@@ -152,10 +152,14 @@ class STaR(nn.Module):
             # pose_matrices[:, :3, 3] = pose_matrices_[:, 3, :3]
             # pose_matrices[:, 3, 3] = 1.
             # pose_matrices = pose_matrices[:, None, ...]
-            pose = self.get_poses()[frames,...]
-            pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
-            
-
+            pose = self.get_poses()[frames,...] 
+            trans = pose[:, 0, :3]
+            rot = pose[:, 0, 3:]
+            #pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
+            pose_matrices = torch.eye(4, device=pose.device, dtype=torch.float32)[None,None,...].repeat_interleave(N_rays, dim=0)
+            pose_matrices[:, 0, :3, :3] = SO3.exp(rot).matrix()[:, :3, :3]
+            pose_matrices[:, 0, :3, 3] = trans
+            #TODO did not test this implementation yet
 
         pose_matrices_pts = pose_matrices.expand((N_rays, N_samples, 4, 4)) # [N_rays, N_samples, 4, 4]
         pose_matrices_pts_flat = pose_matrices_pts.reshape((N_rays*N_samples, 4, 4)) # [N_rays*N_samples, 4, 4]

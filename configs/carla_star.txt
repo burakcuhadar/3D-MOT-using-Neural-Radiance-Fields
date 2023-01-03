@@ -1,6 +1,6 @@
-expname = carla_star_resnet
+expname = carla_star_resnet_semantic
 basedir = ./logs
-datadir = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic
+datadir = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_semantic
 dataset_type = carla_star
 
 # to load appearance init ckpt
@@ -11,10 +11,8 @@ skip_appearance_init = True
 #appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_1yfts7ow/appearance_epoch_258.ckpt
 # apperance for original dataset N_samples 128
 #appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_uafk0n6d/appearance_epoch_237.ckpt
-# appearance for batchnorm resnet depth=8 N_samples 128
-#appearance_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_3f6umgsq/appearance_epoch_252.ckpt
-# appearance for the new implementation
-appearance_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_mydg8xrz/appearance_epoch_761.ckpt
+# appearance for widths=512 N_samples=256
+appearance_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet_semantic/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_semantic_2zp8ux68/appearance_epoch_1034.ckpt
 
 # old one
 # appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2tltpu5d/appearance_epoch_347.ckpt
@@ -50,7 +48,7 @@ netchunk = 16384
 
 scale_factor = 0.2
 
-N_samples = 128
+N_samples = 256
 N_importance = 256
 N_rand = 600
 chunk = 600
@@ -69,12 +67,13 @@ epochs_appearance = 5000
 epochs_online = 50000
 epoch_ckpt = 50
 epoch_print = 1
-epoch_val = 10
+epoch_val = 25
 
-appearance_init_thres = 1e-3
+appearance_init_thres = 9e-4
 online_thres = 9e-4
 initial_num_frames = 5
 entropy_weight = 2e-3
+car_sample_ratio = 0.5
 
 no_test_set = True
 save_video_frames = True

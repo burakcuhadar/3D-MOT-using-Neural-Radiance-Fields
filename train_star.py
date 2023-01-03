@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 from utils.logging import LoggerWandb
+from utils.io import set_seeds
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from models.star import STaR
 from tqdm import tqdm, trange
@@ -226,13 +227,13 @@ def train_appearance_init(star_model, args, logger_wandb):
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
     scheduler = get_scheduler(args, optimizer)
 
-    #TODO: Load checkpoint for appearance initialization
+    
     step_restored = 0
-    '''if args.ckpt_path is not None:
-        step_restored = load_ckpt(args.ckpt_path, model_coarse, model_fine, optimizer, scheduler)
+    if args.appearance_ckpt_path is not None:
+        step_restored = load_ckpt(args.appearance_ckpt_path, star_model, optimizer, scheduler)
         print("Resuming from step:", step_restored)
     else:
-        print("No checkpoint given, starting from scratch")'''
+        print("No checkpoint given, starting from scratch")
 
     print('use_batching', train_appearance_dataset.use_batching)
     print('number of batches', len(train_appearance_dataloader))
@@ -240,7 +241,7 @@ def train_appearance_init(star_model, args, logger_wandb):
 
     m1 = args.appearance_init_thres
 
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.cuda.amp.GradScaler(enabled=False)
 
     for step in tqdm(range(step_restored+1, epochs+1), desc="Appearance Initialization Training epochs"):
 
@@ -264,7 +265,7 @@ def train_appearance_init(star_model, args, logger_wandb):
 
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=False):
                 rgb, disp, acc, extras = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
                     retraw=True, N_importance=args.N_importance, appearance_init=True)
                 
@@ -337,7 +338,7 @@ def train_appearance_init(star_model, args, logger_wandb):
 
     star_model.poses_.requires_grad = True
 
-load_gt_poses = True #TODO!!!!!!!!!!!
+load_gt_poses = False #TODO!!!!!!!!!!!
 
 def train_online(star_model, args, logger_wandb):
 
@@ -345,7 +346,7 @@ def train_online(star_model, args, logger_wandb):
 
     # Create optimizer
     optimizer = torch.optim.Adam(star_model.get_nerf_params(), lr=args.lrate, betas=(0.9, 0.999))
-    pose_optimizer = torch.optim.SGD([star_model.poses_], lr=args.lrate_pose)
+    pose_optimizer = torch.optim.Adam([star_model.poses_], lr=args.lrate_pose)
 
     scheduler = LambdaLR(optimizer, lr_lambda=get_scheduler_online(args))
 
@@ -364,12 +365,12 @@ def train_online(star_model, args, logger_wandb):
     train_online_dataset, train_online_dataloader, val_online_dataset, val_online_dataloader, train_render_dataset, \
         train_render_dataloader = setup_dataset(dataset_class, args, k)
     
-    ''' noisy pose initialization
+    ''' noisy pose initialization'''
     if step_restored == 0:
         print('poses before assigning', star_model.poses_)
         with torch.no_grad():
             star_model.poses_ += train_online_dataset.get_noisy_gt_relative_poses()[1:,...].to(device)
-    '''
+    
 
     print('starting online training with these poses: ', star_model.get_poses())
 
@@ -547,6 +548,7 @@ def train():
 
 
 if __name__=='__main__':
+    set_seeds()
     train()
 
 

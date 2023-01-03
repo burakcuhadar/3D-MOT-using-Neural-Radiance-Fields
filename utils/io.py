@@ -1,5 +1,7 @@
 import os
 import torch
+import random
+import numpy as np
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -18,19 +20,17 @@ def copy_config_save_args(basedir, expname, args):
         with open(f, 'w') as file:
             file.write(open(args.config, 'r').read())
 
-def load_ckpt(ckpt_path, model_coarse, model_fine, optimizer, scheduler):
+def load_ckpt(ckpt_path, star_model, optimizer, scheduler):
     ckpt = torch.load(ckpt_path)
-    model_coarse.load_state_dict(ckpt['model_coarse'])
-    if model_fine is not None:
-        model_fine.load_state_dict(ckpt['model_fine'])
+    star_model.load_state_dict(ckpt['star_model'])
     optimizer.load_state_dict(ckpt['optimizer'])
     scheduler.load_state_dict(ckpt['scheduler'])
     step_restored = ckpt['step']
     return step_restored
 
 def load_ckpt_appearance(ckpt_path, star_model, device):
-    ckpt = torch.load(ckpt_path, map_location=device) #TODO map location not required?
-    star_model.load_state_dict(ckpt['star_model'], strict=False) #TODO remove strict
+    ckpt = torch.load(ckpt_path) #TODO map location not required?
+    star_model.load_state_dict(ckpt['star_model']) #TODO remove strict
 
 def load_ckpt_online(ckpt_path, star_model, optimizer, scheduler, pose_optimizer=None):
     ckpt = torch.load(ckpt_path)
@@ -84,6 +84,12 @@ def save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k, pose_
     }, path)
     print('Saved checkpoints at', path)
 
+def set_seeds(seed=1024):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 def config_parser():
@@ -147,6 +153,8 @@ def config_parser():
     parser.add_argument("--online_ckpt_path", type=str, default=None, 
                         help='online training checkpoint file to load state') # TODO use this
 
+    parser.add_argument("--car_sample_ratio", type=float, default=0.5,
+                        help='ratio of the car rays to non-car rays used for each mini batch during training')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64, 

@@ -10,14 +10,14 @@ class BaseStarDataset(Dataset):
     def __init__(self, args):
         self.render_test = args.render_test
         self.chunk = args.chunk
-        self.perturb = args.perturb if self.split == 'train' else 0
+        self.perturb = args.perturb if self.split.startswith('train') else 0
         self.ndc = not (args.dataset_type != 'llff' or args.no_ndc)
         self.lindisp = args.lindisp
         self.N_samples = args.N_samples
         self.N_rand = args.N_rand
         self.use_viewdirs = args.use_viewdirs
         self.use_batching = not args.no_batching 
-        
+        self.car_sample_ratio = args.car_sample_ratio
 
         if self.split in ['test','render_video'] and args.render_factor!=0:
             # Render downsampled for speed
@@ -45,6 +45,8 @@ class BaseStarDataset(Dataset):
             print('rays_o', self.rays_o.shape) 
             print('rays_d', self.rays_d.shape) 
             print('target_rgbs', self.target_rgbs.shape)
+            #TODO no semantic rays! (will delete use_batching anyway?)
+            raise NotImplementedError()
 
         elif self.split == 'train_online' and self.use_batching:
             rays = np.stack([get_rays_np(self.H, self.W, self.K, p) for p in self.poses[:,:3,:4]], 0) # [N,ro+rd,H,W,3]
@@ -69,6 +71,8 @@ class BaseStarDataset(Dataset):
             print('rays_o', self.rays_o.shape) 
             print('rays_d', self.rays_d.shape) 
             print('target_rgbs', self.target_rgbs.shape)
+            #TODO no semantic rays! (will delete use_batching anyway?)
+            raise NotImplementedError()
 
 
     def __len__(self):
@@ -146,6 +150,8 @@ class BaseStarDataset(Dataset):
                 target = torch.Tensor(target) 
                 pose = self.poses[view_idx, :3, :4]
                 rays_o, rays_d = get_rays(self.H, self.W, self.K, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
+                
+                ''' select N_rand rays'''
                 coords = torch.stack(torch.meshgrid(
                     torch.linspace(0, self.H-1, self.H), 
                     torch.linspace(0, self.W-1, self.W), indexing='ij'), -1)  # (H, W, 2)
@@ -156,6 +162,43 @@ class BaseStarDataset(Dataset):
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 target = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)                    
                 frames = self.frames[view_idx, frame_idx, ...][None,...].repeat(self.N_rand, axis=0)[..., None] # (N_rand, 1)
+                
+                
+                # select only the rays that hit the car
+                '''semantic_img = self.semantic_imgs[view_idx, frame_idx, ...]
+                car_mask = (semantic_img == 10) # H,W (10 is the label for cars in carla)
+                car_pixel_count = car_mask.sum()
+                car_sample_count = min(int(self.N_rand * self.car_sample_ratio), car_pixel_count)
+
+                car_coords = torch.stack(torch.meshgrid(
+                    torch.linspace(0, self.H-1, self.H),
+                    torch.linspace(0, self.W-1, self.W), indexing='ij'), -1) # H,W,2
+                car_coords = car_coords[car_mask] # car_pixel_count, 2
+                car_sample_inds = torch.randperm(car_pixel_count)[:car_sample_count]
+                car_coords = car_coords[car_sample_inds].long()
+
+                non_car_sample_count = self.N_rand - car_sample_count
+                non_car_mask = (semantic_img != 10) # H,W
+                non_car_pixel_count = non_car_mask.sum()
+                
+                non_car_coords = torch.stack(torch.meshgrid(
+                    torch.linspace(0, self.H-1, self.H),
+                    torch.linspace(0, self.W-1, self.W), indexing='ij'), -1) # H,W,2
+                non_car_coords = non_car_coords[non_car_mask] # non_car_pixel_count,2
+                non_car_sample_inds = torch.randperm(non_car_pixel_count)[:non_car_sample_count]
+                non_car_coords = non_car_coords[non_car_sample_inds].long()
+
+                mask = np.full((self.H, self.W), False, dtype=bool)
+                mask[car_coords[:, 0], car_coords[:, 1]] = True
+                if non_car_sample_count > 0:
+                    mask[non_car_coords[:, 0], non_car_coords[:, 1]] = True
+
+                rays_o = rays_o[mask] 
+                rays_d = rays_d[mask]
+                target = target[mask]
+                frames = self.frames[view_idx, frame_idx, ...][None,...].repeat(target.shape[0], axis=0)[..., None]'''
+
+                
                 #print('frames shape', frames.shape)
         elif self.split == 'val_online':
             target = self.imgs.reshape((-1, self.H, self.W, 3))[idx, ...] # (N*num_frames, H, W, 3) => (H, W, 3)
@@ -250,6 +293,7 @@ class BaseStarDataset(Dataset):
         if self.ndc:
             # for forward facing scenes TODO remove ndc
             rays_o, rays_d = ndc_rays(self.H, self.W, self.K[0][0], 1., rays_o, rays_d)
+            raise NotImplementedError()
 
         near, far = self.near * torch.ones_like(rays_d[...,:1]), self.far * torch.ones_like(rays_d[...,:1])
         
@@ -262,7 +306,7 @@ class BaseStarDataset(Dataset):
         N_rays = rays_o.shape[0]
         z_vals = z_vals.expand([N_rays, self.N_samples])
 
-        if self.split == 'train' and self.perturb > 0.:
+        if self.split.startswith('train') and self.perturb > 0.: #TODO also suitable for train_render?
             # get intervals between samples
             mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
             upper = torch.cat([mids, z_vals[...,-1:]], -1)
