@@ -37,11 +37,11 @@ class NeRF(nn.Module):
         self.W = W
 
         # Create embedders for positional encoding
-        embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        embed_fn, input_ch = get_embedder(args.multires, args.end_barf, args.i_embed)
         input_ch_views = 0
         self.embeddirs_fn = None
         if args.use_viewdirs:
-            embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+            embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.end_barf, args.i_embed)
         
         # Used only when not using viewdirs TODO is 5th dim ever used?
         output_ch = 5 if args.N_importance > 0 else 4
@@ -96,7 +96,7 @@ class NeRF(nn.Module):
         torch.nn.init.zeros_(self.alpha_linear.bias)
         torch.nn.init.xavier_uniform_(self.rgb_linear.weight)
 
-    def forward(self, pts, viewdirs, z_vals=None, rays_d=None):
+    def forward(self, pts, viewdirs, z_vals=None, rays_d=None, step=None):
         """
         1. Embed the input points and view directions if given
         2. Forward pass embedded inputs through MLP to get rgb and density
@@ -114,11 +114,11 @@ class NeRF(nn.Module):
             end_i = min(pts_flat.shape[0], i + self.netchunk)
             pts_chunk = pts_flat[i:end_i, :]
             # 1. Embed the input points and view directions if given
-            embedded_pts = self.embed_fn(pts_chunk)
+            embedded_pts = self.embed_fn(pts_chunk, step=step)
 
             if viewdirs is not None:
                 input_dirs_chunk = input_dirs_flat[i:end_i, :]
-                embedded_dirs = self.embeddirs_fn(input_dirs_chunk)
+                embedded_dirs = self.embeddirs_fn(input_dirs_chunk, step=step)
 
             # 2. Forward pass embedded inputs through MLP to get rgb and density
             h = embedded_pts

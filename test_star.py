@@ -28,7 +28,7 @@ def test():
     if args.online_ckpt_path is None:
         print("No checkpoint given, cannot test star")
         return
-    load_star_ckpt_for_test(args.online_ckpt_path, star_model)
+    step = load_star_ckpt_for_test(args.online_ckpt_path, star_model)
 
     
     render_video_dataset = dataset_class(args, split='render_video')
@@ -47,7 +47,7 @@ def test():
     # Create video
     print('Starting video rendering')
     rgbs, disps, rgb_statics0, rgb_dynamics0, rgb_statics, rgb_dynamics = render_path_star(render_video_dataloader, 
-        star_model, args.N_importance, device, savedir=video_frames_savedir if args.save_video_frames else None)
+        star_model, args.N_importance, device, savedir=video_frames_savedir if args.save_video_frames else None, step=step)
 
     print('Done video rendering, saving', rgbs.shape, disps.shape)
     moviebase = os.path.join(args.basedir, args.expname+'_test', '{}_translation'.format(args.expname))

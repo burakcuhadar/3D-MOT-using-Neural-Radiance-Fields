@@ -48,7 +48,7 @@ class STaR(nn.Module):
         return list(self.static_coarse_nerf.parameters()) + list(self.static_fine_nerf.parameters()) + \
                list(self.dynamic_coarse_nerf.parameters()) + list(self.dynamic_fine_nerf.parameters())
 
-    def forward(self, pts, viewdirs, z_vals, rays_d, frames=None, is_coarse=True, object_pose=None):
+    def forward(self, pts, viewdirs, z_vals, rays_d, frames=None, is_coarse=True, object_pose=None, step=None):
         rgb_map_chunks, disp_map_chunks, acc_map_chunks, weights_chunks, depth_map_chunks = [], [], [], [], []
         if frames is not None or object_pose is not None:
             entropy = 0
@@ -68,7 +68,7 @@ class STaR(nn.Module):
             else:
                 frames_chunk = None
 
-            chunk_result = self.forward_chunk(pts_chunk, viewdirs_chunk, z_vals_chunk, rays_d_chunk, frames_chunk, is_coarse, object_pose=object_pose)
+            chunk_result = self.forward_chunk(pts_chunk, viewdirs_chunk, z_vals_chunk, rays_d_chunk, frames_chunk, is_coarse, object_pose=object_pose, step=step)
 
             if frames is None and object_pose is None:
                 rgb_map, disp_map, acc_map, weights, depth_map = chunk_result # TODO adapt for entropy
@@ -109,7 +109,7 @@ class STaR(nn.Module):
             else:
                 return rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic
 
-    def forward_chunk(self, pts, viewdirs, z_vals, rays_d, frames=None, is_coarse=True, object_pose=None):
+    def forward_chunk(self, pts, viewdirs, z_vals, rays_d, frames=None, is_coarse=True, object_pose=None, step=None):
         """STaR's forward
         Args:
             pts: [N_rays, N_samples, 3]. Points sampled according to stratified sampling.
@@ -132,7 +132,7 @@ class STaR(nn.Module):
             static_model = self.static_fine_nerf
             dynamic_model = self.dynamic_fine_nerf
 
-        raw_alpha_static, raw_rgb_static = static_model(pts, viewdirs)
+        raw_alpha_static, raw_rgb_static = static_model(pts, viewdirs, step=None)
 
         # During appearance initialization only static part is trained
         if frames is None and object_pose is None:
@@ -178,7 +178,7 @@ class STaR(nn.Module):
 
         viewdirs_dynamic = torch.einsum('nab,nb->na', pose_matrices[:, 0, :3, :3], viewdirs)
 
-        raw_alpha_dynamic, raw_rgb_dynamic = dynamic_model(pts_dynamic, viewdirs_dynamic)
+        raw_alpha_dynamic, raw_rgb_dynamic = dynamic_model(pts_dynamic, viewdirs_dynamic, step=step)
 
         result = raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rgb_dynamic, z_vals, rays_d, 
             static_model.raw_noise_std if (self.training and frames is None) else 0, #From the paper: "we add small Gaussian noise to the density outputs during appearance initialization but turn it off during online training."

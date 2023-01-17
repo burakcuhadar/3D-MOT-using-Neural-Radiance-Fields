@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 from models.star import STaR
 from tqdm import tqdm, trange
 import wandb
+import time
 
 import matplotlib.pyplot as plt
 
@@ -108,7 +109,7 @@ def val_step(val_dataset, val_dataloader, train_render_dataset, train_render_dat
     star_model.eval()
     with torch.no_grad():
         rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-            frames=frames, retraw=True, N_importance=args.N_importance)
+            frames=frames, retraw=True, N_importance=args.N_importance, step=step)
     
     val_mse = img2mse(rgb, target)
     psnr = mse2psnr(val_mse)
@@ -140,7 +141,7 @@ def val_step(val_dataset, val_dataloader, train_render_dataset, train_render_dat
     star_model.eval()
     with torch.no_grad():
         rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-            frames=frames, retraw=True, N_importance=args.N_importance)
+            frames=frames, retraw=True, N_importance=args.N_importance, step=step)
     
     rgb0, disp0, z_std = None, None, None
     if 'rgb0' in extras:
@@ -366,10 +367,10 @@ def train_online(star_model, args, logger_wandb):
         train_render_dataloader = setup_dataset(dataset_class, args, k)
     
     ''' noisy pose initialization'''
-    if step_restored == 0:
+    '''if step_restored == 0:
         print('poses before assigning', star_model.poses_)
         with torch.no_grad():
-            star_model.poses_ += train_online_dataset.get_noisy_gt_relative_poses()[1:,...].to(device)
+            star_model.poses_ += train_online_dataset.get_noisy_gt_relative_poses()[1:,...].to(device)'''
     
 
     print('starting online training with these poses: ', star_model.get_poses())
@@ -390,7 +391,7 @@ def train_online(star_model, args, logger_wandb):
 
         if step != step_restored+1 and train_fine_loss_running / len(train_online_dataloader) < m2:
             path = os.path.join(args.basedir, args.expname + '_' + logger_wandb.run.id, f'online_epoch_{step}.ckpt')
-            save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k)
+            save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k, pose_optimizer)
             
             print('poses for k=', k)
             print(star_model.get_poses())
@@ -431,7 +432,7 @@ def train_online(star_model, args, logger_wandb):
 
             with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=False): #TODO enabled=true
                 rgb, disp, acc, extras, entropy = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-                    frames=frames, retraw=True, N_importance=args.N_importance)
+                    frames=frames, retraw=True, N_importance=args.N_importance, step=step)
 
                 # Compute loss
                 img_loss = img2mse(rgb, target)
@@ -548,6 +549,8 @@ def train():
 
 
 if __name__=='__main__':
+    print('torch version', torch.__version__)
+    print('torch cuda version', torch.version.cuda)
     set_seeds()
     train()
 

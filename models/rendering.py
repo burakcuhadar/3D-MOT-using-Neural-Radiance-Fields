@@ -93,7 +93,7 @@ def render(model_coarse, model_fine, pts, viewdirs, z_vals, rays_o, rays_d, retr
 
 
 def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, retraw=True, N_importance=0, 
-    appearance_init=False, object_pose=None): 
+    appearance_init=False, object_pose=None, step=None): 
     
     if appearance_init:
         rgb_map, disp_map, acc_map, weights, depth_map = star_model(pts, viewdirs, z_vals, rays_d, frames, 
@@ -101,7 +101,7 @@ def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
     else:
         if frames is not None:
             rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic, transformed_pts = \
-                star_model(pts, viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose)
+                star_model(pts, viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose, step=step)
         else:
             rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
                 viewdirs, z_vals, rays_d, frames, is_coarse=True, object_pose=object_pose)
@@ -127,7 +127,7 @@ def render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, frames=None, 
         else:
             if frames is not None:
                 rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic, transformed_pts = \
-                    star_model(pts, viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose)
+                    star_model(pts, viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose, step=step)
             else:
                 rgb_map, disp_map, acc_map, weights, depth_map, entropy, rgb_map_static, rgb_map_dynamic = star_model(pts, 
                     viewdirs, z_vals, rays_d, frames, is_coarse=False, object_pose=object_pose)
@@ -357,8 +357,8 @@ def render_path(render_dataloader, model_coarse, model_fine, N_importance, devic
 
     return rgbs, disps, test_loss, test_psnr
 
-
-def render_path_star(render_dataloader, star_model, N_importance, device, savedir=None):
+# step is required for barf encoding
+def render_path_star(render_dataloader, star_model, N_importance, device, savedir=None, step=None):
     rgbs = []
     disps = []
     rgb_statics0 = []
@@ -375,7 +375,7 @@ def render_path_star(render_dataloader, star_model, N_importance, device, savedi
             pts, viewdirs, z_vals, rays_o, rays_d, object_pose = batch
 
             rgb, disp, acc, extras, _ = render_star(star_model, pts, viewdirs, z_vals, rays_o, rays_d, 
-                retraw=True, N_importance=N_importance, object_pose=object_pose)
+                retraw=True, N_importance=N_importance, object_pose=object_pose, step=step)
             
             rgbs.append(to8b(rgb.cpu().detach().numpy().reshape((H, W, 3))))
             disps.append(disp.cpu().detach().numpy().reshape((H, W, 1)))

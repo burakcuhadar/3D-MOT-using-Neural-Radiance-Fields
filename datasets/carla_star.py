@@ -93,11 +93,12 @@ class CarlaStarDataset(BaseStarDataset):
 
         if split == 'render_video':
             # Render video by moving the car
-            self.object_poses = np.stack([pose_translational(t) for t in np.arange(-2., 8., 0.25)], axis=0) 
+            self.object_poses = np.stack([pose_translational(t) for t in np.arange(0., 8., 0.25)], axis=0) 
             #self.object_poses = self.get_gt_vehicle_poses(args)
             poses = pose_spherical(-90., 15.)[None, ...]
             imgs = None
             frames = None
+            semantic_imgs = None
         else:
             imgs, semantic_imgs, poses, frames = self.load_imgs_poses(args, split)
 

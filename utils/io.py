@@ -52,6 +52,7 @@ def load_ckpt_for_test(ckpt_path, model_coarse, model_fine):
 def load_star_ckpt_for_test(ckpt_path, star_model):
     ckpt = torch.load(ckpt_path)
     star_model.load_state_dict(ckpt['star_model'])
+    return ckpt['step']
 
 
 def save_ckpt(path, model_coarse, model_fine, optimizer, scheduler, step):
@@ -155,6 +156,8 @@ def config_parser():
 
     parser.add_argument("--car_sample_ratio", type=float, default=0.5,
                         help='ratio of the car rays to non-car rays used for each mini batch during training')
+    parser.add_argument("--end_barf", type=int, default=1000,
+                        help='the epoch that barf encoding becomes equal to the original positional encoding')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64, 
