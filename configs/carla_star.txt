@@ -25,13 +25,14 @@ skip_appearance_init = True
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2ap59sto/online_epoch_1450.ckpt
 #online_ckpt_path =  /usr/stud/cuhadar/storage/user/star_resnet/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_3v38w5hc/online_epoch_1775.ckpt
 #online_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_21bjblbn/online_epoch_350.ckpt
-online_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_2o0o77lv/online_epoch_1000.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_2o0o77lv/online_epoch_1000.ckpt
 
 # For testing 
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_ijv58ml9/online_epoch_279.ckpt
 #lr=1000 minus update
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/star_manual_pose_update/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_320xuimg/online_epoch_1475.ckpt
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_1utk23yd/online_epoch_150.ckpt
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_33pvn8b4/online_epoch_1305.ckpt
 
 # to train appearnace init
 #skip_appearance_init = False
