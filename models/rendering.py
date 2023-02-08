@@ -236,8 +236,8 @@ def raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rg
     rgb_map_dynamic = torch.sum(T_d[...,None] * alpha_dynamic[...,None] * rgb_dynamic, dim=-2)
 
     #weights = T * (alpha_static + alpha_dynamic)
-    #weights = T * alpha_total # [N_rays, N_samples]
-    weights = T_s * T_d * alpha_total
+    weights = T * alpha_total # [N_rays, N_samples]
+    #weights = T_s * T_d * alpha_total
 
     depth_map = torch.sum(weights * z_vals, -1)
     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))

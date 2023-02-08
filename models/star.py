@@ -137,7 +137,7 @@ class STaR(nn.Module):
         # During appearance initialization only static part is trained
         if frames is None and object_pose is None:
             return raw2outputs(raw_alpha_static, raw_rgb_static, z_vals, rays_d, 
-                static_model.raw_noise_std if self.training else 0, static_model.white_bkgd, ret_entropy=False) # TODO experiment with entropy during appearance init
+                static_model.raw_noise_std if self.training else 0, static_model.white_bkgd, ret_entropy=False) 
 
         # Transform points and viewdirs according to learned poses or ground-truth poses if given for debugging
         if object_pose is not None:
@@ -156,7 +156,7 @@ class STaR(nn.Module):
             trans = pose[:, 0, :3]
             rot = pose[:, 0, 3:]
             #pose_matrices = SE3.exp(pose).matrix() # [N_rays, 1, 4, 4]
-            pose_matrices = torch.eye(4, device=pose.device, dtype=torch.float32)[None,None,...].repeat_interleave(N_rays, dim=0)
+            pose_matrices = torch.eye(4, device=self.poses_.device, dtype=torch.float32)[None,None,...].repeat_interleave(N_rays, dim=0)
             pose_matrices[:, 0, :3, :3] = SO3.exp(rot).matrix()[:, :3, :3]
             pose_matrices[:, 0, :3, 3] = trans
             #TODO did not test this implementation yet
@@ -181,7 +181,7 @@ class STaR(nn.Module):
         raw_alpha_dynamic, raw_rgb_dynamic = dynamic_model(pts_dynamic, viewdirs_dynamic, step=step)
 
         result = raw2outputs_star(raw_alpha_static, raw_rgb_static, raw_alpha_dynamic, raw_rgb_dynamic, z_vals, rays_d, 
-            static_model.raw_noise_std if (self.training and frames is None) else 0, #From the paper: "we add small Gaussian noise to the density outputs during appearance initialization but turn it off during online training."
+            0, #From the paper: "we add small Gaussian noise to the density outputs during appearance initialization but turn it off during online training."
             static_model.white_bkgd, ret_entropy=True)
 
         if frames is not None and object_pose is None:

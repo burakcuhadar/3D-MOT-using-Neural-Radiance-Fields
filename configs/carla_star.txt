@@ -15,6 +15,9 @@ skip_appearance_init = True
 #appearance_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet_semantic/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_semantic_2zp8ux68/appearance_epoch_1034.ckpt
 # appearance widths=512 N_samples=256 stratified sampling
 #appearance_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet_semantic/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_semantic_48oo99st/appearance_epoch_1004.ckpt
+# new rendering 
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_35prtxpp/appearance_epoch_1389.ckpt
+
 
 # old one
 # appearance_ckpt_path = /usr/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_2tltpu5d/appearance_epoch_347.ckpt
@@ -32,7 +35,7 @@ skip_appearance_init = True
 #lr=1000 minus update
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/star_manual_pose_update/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_320xuimg/online_epoch_1475.ckpt
 #online_ckpt_path = /usr/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_1utk23yd/online_epoch_150.ckpt
-online_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_33pvn8b4/online_epoch_1305.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_resnet_barf_encoding/3D-MOT-using-Neural-Radiance-Fields/logs/carla_star_resnet_barf_enc_33pvn8b4/online_epoch_1305.ckpt
 
 # to train appearnace init
 #skip_appearance_init = False
@@ -56,8 +59,8 @@ scale_factor = 0.2
 
 N_samples = 256
 N_importance = 256
-N_rand = 400
-chunk = 400
+N_rand = 600
+chunk = 600
 
 num_workers = 2
 
@@ -80,6 +83,7 @@ online_thres = 1e-3
 initial_num_frames = 5
 entropy_weight = 2e-3
 car_sample_ratio = 0.25
+end_barf = 750
 
 no_test_set = True
 save_video_frames = True
