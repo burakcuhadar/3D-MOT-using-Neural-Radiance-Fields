@@ -9,8 +9,6 @@ use_viewdirs = True
 
 num_workers = 4
 
-appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/f5auyqec/lightning_appinit/epoch=3.ckpt
-
 
 netdepth = 8
 netdepth_fine = 8
@@ -19,7 +17,6 @@ netwidth_fine = 512
 N_samples = 256
 N_importance = 256
 end_barf = -1
-
 
 netchunk = 16384
 
