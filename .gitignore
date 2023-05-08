@@ -4,3 +4,4 @@ logs/
 wandb/
 **/__pycache__/
 *.sbatch
+ckpts/

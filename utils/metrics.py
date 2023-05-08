@@ -98,7 +98,8 @@ def rotations_along_trajectory(traj,scale):
     return distances
     
 
-def evaluate_trajectory(traj_gt,traj_est,param_max_pairs=10000,param_fixed_delta=False,param_delta=1.00,param_delta_unit="s",param_offset=0.00,param_scale=1.00):
+def evaluate_trajectory(traj_gt, traj_est, param_max_pairs=10000, param_fixed_delta=False, param_delta=1.00,
+                        param_delta_unit="s", param_offset=0.00, param_scale=1.00):
     """
     Compute the relative pose error between two trajectories.
     
@@ -134,7 +135,8 @@ def evaluate_trajectory(traj_gt,traj_est,param_max_pairs=10000,param_fixed_delta
         if not t_est_return in stamps_est_return:
             stamps_est_return.append(t_est_return)
     if(len(stamps_est_return)<2):
-        raise Exception("Number of overlap in the timestamps is too small. Did you run the evaluation on the right files?")
+        raise Exception('''Number of overlap in the timestamps is too small. Did you run the evaluation on the
+          right files?''')
 
     if param_delta_unit=="s":
         index_est = list(traj_est.keys())
@@ -154,7 +156,8 @@ def evaluate_trajectory(traj_gt,traj_est,param_max_pairs=10000,param_fixed_delta
         if(param_max_pairs==0 or len(traj_est)<numpy.sqrt(param_max_pairs)):
             pairs = [(i,j) for i in range(len(traj_est)) for j in range(len(traj_est))]
         else:
-            pairs = [(random.randint(0,len(traj_est)-1),random.randint(0,len(traj_est)-1)) for i in range(param_max_pairs)]
+            pairs = [(random.randint(0,len(traj_est)-1),random.randint(0,len(traj_est)-1)) 
+                     for i in range(param_max_pairs)]
     else:
         pairs = []
         for i in range(len(traj_est)):
@@ -189,7 +192,8 @@ def evaluate_trajectory(traj_gt,traj_est,param_max_pairs=10000,param_fixed_delta
         result.append([stamp_est_0,stamp_est_1,stamp_gt_0,stamp_gt_1,trans,rot])
         
     if len(result)<2:
-        raise Exception("Couldn't find matching timestamp pairs between groundtruth and estimated trajectory!")
+        raise Exception('''Couldn't find matching timestamp pairs between groundtruth and estimated 
+            trajectory!''')
         
     return result
 

@@ -1,0 +1,71 @@
+expname = lightning_online
+basedir = ./logs
+datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
+dataset_type = carla_star
+num_frames = 17
+
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/g7auvppq/lightning_appinit/epoch=71.ckpt
+
+#TODO eliminate use_viewdirs
+use_viewdirs = True
+
+accumulate_grad_batches = 1
+
+lrate = 5e-4
+lrate_static = 5e-4
+lrate_dynamic = 1e-3
+lrate_decay_steps = [30, 60, 90]
+lrate_decay_rate = 0.5
+
+lrate_pose = 1e-3
+pose_lrate_decay_steps = [30, 60]
+pose_lrate_decay_rate = 0.5
+
+netdepth = 8
+netdepth_fine = 8
+netwidth = 512
+netwidth_fine = 512
+
+netchunk = 16384
+
+scale_factor = 0.01
+
+N_samples = 256
+N_importance = 256
+
+
+#N_rand = 600
+#mixed_precision = True
+N_rand = 400
+mixed_precision = False
+
+#TODO eliminate chunk?
+chunk = 5000
+
+num_workers = 4
+
+no_batching = False
+epochs_online = 1000
+epoch_ckpt = 1
+#TODO eliminate epoch_print?
+epoch_print = 1
+epoch_val = 1
+
+#no_batching = True
+#epochs_appearance = 5000
+#epochs_online = 50000
+#epoch_ckpt = 50
+#epoch_print = 1
+#epoch_val = 25
+
+
+online_thres = 7e-4
+initial_num_frames = 5
+entropy_weight = 5e-3
+end_barf = -1
+
+
+#TODO these are needed?
+no_test_set = True
+save_video_frames = True
+

@@ -1,25 +1,20 @@
-name: 3DMOT-Nerf-new
+name: 3DMOT-Nerf-lightning
 channels:
     - pytorch
     - nvidia
-    - conda-forge
-    - anaconda
-    - pytorch3d
 dependencies:
-    - python=3.9
+    - python=3.10
     - pip
     - pytorch
-    - pytorch-cuda=11.6
-    - torchvision>=0.9.1
-    - numpy 
-    - pytorch3d
-    - scipy
+    - pytorch-cuda=11.8
+    - torchvision
     - pip:
+        - scipy
+        - pytorch-lightning
         - tqdm
         - opencv-python
         - imageio
         - imageio-ffmpeg
-        - matplotlib
         - configargparse
         - wandb
         - git+https://github.com/princeton-vl/lietorch.git

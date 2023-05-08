@@ -2,6 +2,8 @@ import os
 import torch
 import random
 import numpy as np
+from collections import OrderedDict
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -20,77 +22,15 @@ def copy_config_save_args(basedir, expname, args):
         with open(f, 'w') as file:
             file.write(open(args.config, 'r').read())
 
-def load_ckpt(ckpt_path, star_model, optimizer, scheduler):
+
+def load_star_network_from_ckpt(ckpt_path, star_network):
     ckpt = torch.load(ckpt_path)
-    star_model.load_state_dict(ckpt['star_model'])
-    optimizer.load_state_dict(ckpt['optimizer'])
-    scheduler.load_state_dict(ckpt['scheduler'])
-    step_restored = ckpt['step']
-    return step_restored
-
-def load_ckpt_appearance(ckpt_path, star_model, device):
-    ckpt = torch.load(ckpt_path) #TODO map location not required?
-    star_model.load_state_dict(ckpt['star_model']) #TODO remove strict
-
-def load_ckpt_online(ckpt_path, star_model, optimizer, scheduler, pose_optimizer=None):
-    ckpt = torch.load(ckpt_path)
-    star_model.load_state_dict(ckpt['star_model'])
-    optimizer.load_state_dict(ckpt['optimizer'])
-    if pose_optimizer is not None:
-        pose_optimizer.load_state_dict(ckpt['pose_optimizer'])
-    scheduler.load_state_dict(ckpt['scheduler'])
-    step_restored = ckpt['step']
-    k = ckpt['k']
-    return step_restored, k 
-
-def load_ckpt_for_test(ckpt_path, model_coarse, model_fine):
-    ckpt = torch.load(ckpt_path)
-    model_coarse.load_state_dict(ckpt['model_coarse'])
-    if model_fine is not None:
-        model_fine.load_state_dict(ckpt['model_fine'])
-
-def load_star_ckpt_for_test(ckpt_path, star_model):
-    ckpt = torch.load(ckpt_path)
-    star_model.load_state_dict(ckpt['star_model'])
-    return ckpt['step']
-
-
-def save_ckpt(path, model_coarse, model_fine, optimizer, scheduler, step):
-    torch.save({
-        'step': step,
-        'model_coarse': model_coarse.state_dict(),
-        'model_fine': model_fine.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'scheduler': scheduler.state_dict()
-    }, path)
-    print('Saved checkpoints at', path)
-
-def save_ckpt_star(path, star_model, optimizer, scheduler, step):
-    torch.save({
-        'step': step,
-        'star_model': star_model.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'scheduler': scheduler.state_dict()
-    }, path)
-    print('Saved checkpoints at', path)
-
-def save_ckpt_star_online(path, star_model, optimizer, scheduler, step, k, pose_optimizer=None):
-    torch.save({
-        'step': step,
-        'star_model': star_model.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'pose_optimizer': pose_optimizer.state_dict(),
-        'scheduler': scheduler.state_dict(),
-        'k': k
-    }, path)
-    print('Saved checkpoints at', path)
-
-def set_seeds(seed=1024):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
+    state_dict = OrderedDict()
+    for key in ckpt['state_dict']:
+        if key.startswith('star_network'):
+            state_dict[key.split('star_network', 1)[1][1:]] = ckpt['state_dict'][key]
+    
+    star_network.load_state_dict(state_dict) 
 
 
 def config_parser():
@@ -105,6 +45,8 @@ def config_parser():
                         help='where to store ckpts and logs')
     parser.add_argument("--datadir", type=str, default='./data/llff/fern', 
                         help='input data directory')
+    parser.add_argument("--num_frames", type=int, default=15,
+                        help="number of object poses in the dataset")
 
     # training options
     parser.add_argument("--epochs", type=int, default=0,
@@ -125,9 +67,15 @@ def config_parser():
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument("--lrate_static", type=float, default=5e-4, 
+                        help='learning rate for static nerf')
+    parser.add_argument("--lrate_dynamic", type=float, default=5e-4, 
+                        help='learning rate for dynamic nerf')
     parser.add_argument("--lrate_pose", type=float, default=5e-4, 
                         help='learning rate for pose parameters')
-
+    parser.add_argument("--accumulate_grad_batches", type=int, default=1, 
+                        help='number of batches to accumulate grads, 1 means no grad accumulation')
+    
     
     parser.add_argument("--lrate_decay", type=int, default=500, 
                         help='Period of learning rate decay in epochs')
@@ -137,10 +85,19 @@ def config_parser():
                         help='scheduler decay steps for multisteplr')
     
 
+    parser.add_argument("--pose_lrate_decay", type=int, default=500, 
+                        help='Period of pose learning rate decay in epochs')
+    parser.add_argument("--pose_lrate_decay_rate", type=float, default=0.1,
+                        help='Pose Learning rate decay rate')
+    parser.add_argument("--pose_lrate_decay_steps", nargs='+', type=int, default=[],
+                        help='pose scheduler decay steps for multisteplr')
+    
+
     parser.add_argument("--chunk", type=int, default=1024*32, 
                         help='number of rays processed in parallel, decrease if running out of memory')
     parser.add_argument("--netchunk", type=int, default=1024*64, 
-                        help='number of pts sent through network in parallel, decrease if running out of memory')
+                        help='''number of pts sent through network in parallel, decrease if running out of 
+                              memory''')
     parser.add_argument("--no_batching", action='store_true', 
                         help='only take random rays from 1 image at a time')
     parser.add_argument("--ckpt_path", type=str, default=None, 
@@ -152,11 +109,11 @@ def config_parser():
     parser.add_argument("--appearance_ckpt_path", type=str, default=None, 
                         help='appearance init checkpoint file to load state')
     parser.add_argument("--online_ckpt_path", type=str, default=None, 
-                        help='online training checkpoint file to load state') # TODO use this
+                        help='online training checkpoint file to load state')
 
     parser.add_argument("--car_sample_ratio", type=float, default=0.5,
                         help='ratio of the car rays to non-car rays used for each mini batch during training')
-    parser.add_argument("--end_barf", type=int, default=1000,
+    parser.add_argument("--end_barf", type=int, default=-1,
                         help='the epoch that barf encoding becomes equal to the original positional encoding')
 
     # rendering options
@@ -183,8 +140,8 @@ def config_parser():
                         help='denotes whether the dataset has no test views')
     parser.add_argument("--render_test", action='store_true', 
                         help='render the test set instead of render_poses path')
-    parser.add_argument("--render_factor", type=int, default=0, 
-                        help='downsampling factor to speed up rendering, set 4 or 8 for fast preview')
+    # parser.add_argument("--render_factor", type=int, default=0, 
+    #                     help='downsampling factor to speed up rendering, set 4 or 8 for fast preview')
 
     
     parser.add_argument("--scale_factor", type=float, default=-1,
@@ -200,7 +157,8 @@ def config_parser():
 
     # star hyperparameters
     parser.add_argument("--appearance_init_thres", type=float, default=2e-3, 
-                        help='threshold for loss to finish appearance initialization training (m1 in the paper)')
+                        help='''threshold for loss to finish appearance initialization training (m1 in the 
+                             paper)''')
     parser.add_argument("--online_thres", type=float, default=1e-3, 
                         help='threshold for loss to finish online training (m2 in the paper)')
     parser.add_argument("--initial_num_frames", type=int, default=5, 
@@ -212,9 +170,14 @@ def config_parser():
     parser.add_argument("--dataset_type", type=str, default='blender', 
                         help='options: llff / blender / deepvoxels / carla_static / carla_star')
     parser.add_argument("--testskip", type=int, default=8, 
-                        help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
+                        help='''will load 1/N images from test/val sets, useful for large datasets like 
+                             deepvoxels''')
     parser.add_argument("--num_workers", type=int, default=1,
                         help='number of workers used in torch dataloader')
+    parser.add_argument("--near", type=float, default=3., 
+                    help='near limit for rays')
+    parser.add_argument("--far", type=float, default=80., 
+                    help='far limit for rays')
 
     ## deepvoxels flags
     parser.add_argument("--shape", type=str, default='greek', 
@@ -246,11 +209,9 @@ def config_parser():
     parser.add_argument("--epoch_val", type=int, default=50, 
                     help="frequency of validation view saving")
     
-
-    '''parser.add_argument("--epoch_video", type=int, default=2000, NOTE: video rendering and test set inference is done 
-                    help="frequency of render_poses video saving")        in test_nerf.py
-    parser.add_argument("--epoch_testset", type=int, default=1000, 
-                    help="frequency of testset saving")'''
+    
+    parser.add_argument("--mixed_precision", action='store_true', 
+                        help='train with mixed precision')
     
     
     return parser
