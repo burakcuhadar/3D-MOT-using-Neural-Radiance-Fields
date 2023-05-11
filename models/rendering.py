@@ -132,6 +132,104 @@ def render_star_appinit(
     return result
 
 
+def render_nerf(
+    nerf_coarse, nerf_fine, pts, viewdirs, z_vals, rays_o, rays_d, N_importance
+):
+    # Pass through coarse network
+    raw_alpha_coarse, raw_rgb_coarse = nerf_coarse(pts, viewdirs, step=None)
+    result_coarse = raw2outputs(
+        raw_alpha_coarse,
+        raw_rgb_coarse,
+        z_vals,
+        rays_d,
+        nerf_coarse.raw_noise_std if nerf_coarse.training else 0,
+        nerf_coarse.white_bkgd,
+        ret_entropy=False,
+    )
+
+    # Hierarchical volume sampling
+    z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    z_samples = sample_pdf(
+        z_vals_mid,
+        result_coarse["weights"][..., 1:-1],
+        N_importance,
+        det=(not nerf_coarse.training),
+    )
+    z_samples = z_samples.detach()
+    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+
+    pts = (
+        rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
+    )  # [N_rays, N_samples + N_importance, 3]
+
+    raw_alpha_fine, raw_rgb_fine = nerf_fine(pts, viewdirs, step=None)
+    result_fine = raw2outputs(
+        raw_alpha_fine,
+        raw_rgb_fine,
+        z_vals,
+        rays_d,
+        nerf_fine.raw_noise_std if nerf_fine.training else 0,
+        nerf_fine.white_bkgd,
+        ret_entropy=False,
+    )
+
+    # For visualization
+    z_std = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
+
+    result = {}
+    result.update(result_fine)
+    for k, v in result_fine.items():
+        result[k + "0"] = v
+    result["z_std"] = z_std
+
+    return result
+
+
+def render_star_appinit_semantic(
+    star_network,
+    pts_car,
+    viewdirs_car,
+    z_vals_car,
+    rays_o_car,
+    rays_d_car,
+    pts_noncar,
+    viewdirs_noncar,
+    z_vals_noncar,
+    rays_o_noncar,
+    rays_d_noncar,
+    N_importance,
+):
+    render_car = render_nerf(
+        star_network.dynamic_coarse_nerf,
+        star_network.dynamic_fine_nerf,
+        pts_car,
+        viewdirs_car,
+        z_vals_car,
+        rays_o_car,
+        rays_d_car,
+        N_importance,
+    )
+
+    render_noncar = render_nerf(
+        star_network.static_coarse_nerf,
+        star_network.static_fine_nerf,
+        pts_noncar,
+        viewdirs_noncar,
+        z_vals_noncar,
+        rays_o_noncar,
+        rays_d_noncar,
+        N_importance,
+    )
+
+    result = {}
+    for k, v in render_car.items():
+        result[k + "_car"] = v
+    for k, v in render_noncar.items():
+        result[k + "_noncar"] = v
+
+    return result
+
+
 def render_star_online(
     star_network, pts, viewdirs, z_vals, rays_o, rays_d, N_importance, pose, step
 ):

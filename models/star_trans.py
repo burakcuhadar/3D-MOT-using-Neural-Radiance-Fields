@@ -172,6 +172,11 @@ class STaR(nn.Module):
         )
         pts_dynamic_homog = pts_dynamic_homog_flat.reshape((N_rays, N_samples, 4))
         pts_dynamic = pts_dynamic_homog[..., :3]  # [N_rays, N_samples, 3]
+        # pts_dynamic.retain_grad()
+        # print(pts_dynamic.grad)
+        # pts_dynamic.register_hook(print)
+        # if self.training:
+        #     pts_dynamic.register_hook(lambda grad: self.poses_grad.append(grad))
 
         viewdirs_dynamic = torch.einsum(
             "nab,nb->na", pose_matrices[:, 0, :3, :3], viewdirs

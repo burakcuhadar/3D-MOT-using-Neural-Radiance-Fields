@@ -1,4 +1,4 @@
-expname = lightning_appinit
+expname = lightning_appinit_semantic
 basedir = ./logs
 datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
 dataset_type = carla_star
@@ -12,12 +12,13 @@ num_workers = 4
 
 netdepth = 8
 netdepth_fine = 8
-netwidth = 512
-netwidth_fine = 512
+netwidth = 256
+netwidth_fine = 256
 N_samples = 256
 N_importance = 256
 end_barf = -1
 
+chunk = 5000
 netchunk = 16384
 
 scale_factor = 0.01
@@ -30,12 +31,8 @@ lrate_decay_rate = 0.5
 
 #N_rand = 600
 #mixed_precision = True
-N_rand = 600
+N_rand = 1000
 mixed_precision = False
-
-
-#TODO eliminate chunk?
-chunk = 5000
 
 
 no_batching = False

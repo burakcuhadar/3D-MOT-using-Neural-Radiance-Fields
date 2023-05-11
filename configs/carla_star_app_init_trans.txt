@@ -1,0 +1,59 @@
+expname = lightning_appinit
+basedir = ./logs
+datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
+dataset_type = carla_star
+num_frames = 17
+
+#TODO eliminate use_viewdirs
+use_viewdirs = True
+
+num_workers = 4
+
+
+netdepth = 8
+netdepth_fine = 8
+netwidth = 256
+netwidth_fine = 256
+N_samples = 256
+N_importance = 256
+end_barf = -1
+
+chunk = 5000
+netchunk = 16384
+
+scale_factor = 0.01
+near = 3.0
+far = 80.0
+
+lrate = 5e-4
+lrate_decay = 30
+lrate_decay_rate = 0.5
+
+#N_rand = 600
+#mixed_precision = True
+N_rand = 1000
+mixed_precision = False
+
+
+no_batching = False
+epochs_appearance = 80
+epoch_ckpt = 1
+#TODO eliminate epoch_print?
+epoch_print = 1
+epoch_val = 1
+
+#no_batching = True
+#epochs_appearance = 5000
+#epochs_online = 50000
+#epoch_ckpt = 50
+#epoch_print = 1
+#epoch_val = 25
+
+appearance_init_thres = 8e-4
+
+
+
+#TODO are these needed for app init?
+no_test_set = True
+save_video_frames = True
+

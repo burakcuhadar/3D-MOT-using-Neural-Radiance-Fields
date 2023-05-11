@@ -10,7 +10,7 @@ from models.rendering import get_rays, get_rays_np
 from utils.dataset import load_intrinsics, natural_keys, from_ue4_to_nerf
 
 
-class StarAppInitDataset(Dataset):
+class StarAppInitSemanticDataset(Dataset):
     def __init__(self, args, split):
         self.validate_split(split)
         self.split = split
@@ -59,13 +59,16 @@ class StarAppInitDataset(Dataset):
             rays_o = rays_o.astype(np.float32)
             rays_d = rays_d.astype(np.float32)
 
-            self.rays_o = rays_o
-            self.rays_d = rays_d
-            self.target_rgbs = target_rgbs
+            car_mask = self.semantic_imgs.reshape([target_rgbs.shape[0]]) == 10
+            noncar_mask = self.semantic_imgs.reshape([target_rgbs.shape[0]]) != 10
 
-            print("rays_o", self.rays_o.shape)
-            print("rays_d", self.rays_d.shape)
-            print("target_rgbs", self.target_rgbs.shape)
+            self.rays_o_car = rays_o[car_mask]
+            self.rays_d_car = rays_d[car_mask]
+            self.target_rgbs_car = target_rgbs[car_mask]
+
+            self.rays_o_noncar = rays_o[noncar_mask]
+            self.rays_d_noncar = rays_d[noncar_mask]
+            self.target_rgbs_noncar = target_rgbs[noncar_mask]
 
     def load_imgs_poses(self, args):
         extrinsics = np.load(
@@ -75,6 +78,7 @@ class StarAppInitDataset(Dataset):
         cameras = sorted(glob(args.datadir + "/camera*/"), key=natural_keys)
 
         imgs = []
+        semantic_imgs = []
         poses = []
 
         for i, cam in enumerate(cameras):
@@ -91,23 +95,36 @@ class StarAppInitDataset(Dataset):
 
             if self.split == "train":
                 imgpaths = []
+                semanticimgpaths = []
                 # :3 since there are also semantic and depth images
                 for path in sorted(glob(cam + "*.png"), key=natural_keys)[:3]:
                     if path.endswith("_semantic.png"):
-                        pass
+                        semanticimgpaths.append(path)
                     elif path.endswith("_depth.png"):
                         pass
                     else:
                         imgpaths.append(path)
+
+                semantic_imgs.append(
+                    [imageio.imread(imgpath) for imgpath in semanticimgpaths]
+                )
+
             elif self.split == "val":
                 imgpaths = sorted(glob(cam + "*.png"), key=natural_keys)[:1]
 
             imgs.append([imageio.imread(imgpath) for imgpath in imgpaths])
+
             poses.append(from_ue4_to_nerf(extrinsics[i]))
+
+        if self.split == "train":
+            semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[
+                ..., 0
+            ]  # [view_num, 1, H, W]
+            self.semantic_imgs = np.squeeze(semantic_imgs, axis=1)
 
         imgs = (np.array(imgs) / 255.0).astype(np.float32)[
             ..., :3
-        ]  # [view_num, frame_num, H, W, 3]
+        ]  # [view_num, 1, H, W, 3]
         imgs = np.squeeze(imgs, axis=1)
         poses = np.array(poses).astype(np.float32)  # [view_num, 4, 4]
 
@@ -115,7 +132,6 @@ class StarAppInitDataset(Dataset):
 
     def __len__(self):
         if self.split == "train":
-            # return len(self.rays_o)
             return 1000
         elif self.split == "val":
             return 1
@@ -124,13 +140,18 @@ class StarAppInitDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.split == "train":
-            indices = np.random.choice(len(self.rays_o), self.N_rand)
-            rays_o = self.rays_o[indices, ...]
-            rays_d = self.rays_d[indices, ...]
-            target = self.target_rgbs[indices, ...]
-
             if not self.use_batching:
                 raise NotImplementedError
+
+            car_indices = np.random.choice(len(self.rays_o_car), self.N_rand // 2)
+            rays_o_car = self.rays_o_car[car_indices, ...]
+            rays_d_car = self.rays_d_car[car_indices, ...]
+            target_car = self.target_rgbs_car[car_indices, ...]
+
+            noncar_indices = np.random.choice(len(self.rays_o_noncar), self.N_rand // 2)
+            rays_o_noncar = self.rays_o_noncar[noncar_indices, ...]
+            rays_d_noncar = self.rays_d_noncar[noncar_indices, ...]
+            target_noncar = self.target_rgbs_noncar[noncar_indices, ...]
 
         elif self.split == "val":
             idx = np.random.randint(low=0, high=self.imgs.shape[0])
@@ -145,7 +166,23 @@ class StarAppInitDataset(Dataset):
             rays_d = torch.reshape(rays_d, [-1, 3])  # (H*W, 3)
             target = torch.reshape(target, [-1, 3])  # (H*W, 3)
 
-        return {"rays_o": rays_o, "rays_d": rays_d, "target": target}
+            # Pass the whole rays as we dont have semantic mask for val views
+            # TODO modify after dataset is corrected
+            rays_o_car = rays_o
+            rays_d_car = rays_d
+            target_car = target
+            rays_o_noncar = rays_o
+            rays_d_noncar = rays_d
+            target_noncar = target
+
+        return {
+            "rays_o_car": rays_o_car,
+            "rays_d_car": rays_d_car,
+            "target_car": target_car,
+            "rays_o_noncar": rays_o_noncar,
+            "rays_d_noncar": rays_d_noncar,
+            "target_noncar": target_noncar,
+        }
 
     # used for debugging
     def find_bounds(self):
