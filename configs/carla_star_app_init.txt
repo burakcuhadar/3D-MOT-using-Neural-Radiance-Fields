@@ -1,11 +1,11 @@
-expname = lightning_appinit_semantic
+expname = lightning_appinit
 basedir = ./logs
-datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
+datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
 has_depth_data = True
-num_frames = 17
+num_frames = 16
 
-#TODO eliminate use_viewdirs
-use_viewdirs = True
+depth_loss = True
+depth_lambda = 0.01
 
 num_workers = 4
 
@@ -26,7 +26,7 @@ near = 3.0
 far = 80.0
 
 lrate = 5e-4
-lrate_decay = 30
+lrate_decay = 40
 lrate_decay_rate = 0.5
 
 #N_rand = 600
@@ -57,3 +57,5 @@ appearance_init_thres = 8e-4
 no_test_set = True
 save_video_frames = True
 
+#TODO eliminate use_viewdirs
+use_viewdirs = True

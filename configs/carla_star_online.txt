@@ -1,20 +1,12 @@
 expname = lightning_online
 basedir = ./logs
-datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
+datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
 has_depth_data = True
-num_frames = 17
+num_frames = 16
 
-# width=512
-# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/g7auvppq/lightning_appinit/epoch=71.ckpt
-# width = 256
-# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/pr5wwdow/lightning_appinit/epoch=79.ckpt
-# semantic training
-# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit_semantic/zks87txr/lightning_appinit_semantic/epoch=60.ckpt
-# depth loss app init
-appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/lhtzz37q/epoch=61.ckpt
 
-depth_loss = True
-depth_lambda = 0.01
+#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/8nu6o4lp/lightning_appinit/epoch=79.ckpt
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mnj18chc/epoch=70.ckpt
 
 load_gt_poses = True
 noisy_pose_init = False
@@ -24,7 +16,7 @@ accumulate_grad_batches = 1
 lrate = 5e-4
 lrate_static = 5e-4
 lrate_dynamic = 5e-4
-lrate_decay_steps = [100]
+lrate_decay_steps = [1000]
 lrate_decay_rate = 0.5
 
 lrate_pose = 5e-4

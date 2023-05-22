@@ -107,6 +107,12 @@ class StarOnline(pl.LightningModule):
         psnr0 = mse2psnr(img_loss0)
         loss += self.args.entropy_weight * (result["entropy"] + result["entropy0"])
 
+        if self.args.depth_loss:
+            depth_loss = torch.mean(
+                ((result["depth"] - batch["target_depth"]) / batch["target_depth"]) ** 2
+            )
+            loss = loss + self.args.depth_lambda * depth_loss
+
         self.training_fine_losses.append(img_loss)
         self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True)
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -120,6 +126,10 @@ class StarOnline(pl.LightningModule):
             ],
         )
         self.log("train/trans_error", trans_error, on_step=False, on_epoch=True)
+        self.log("train/rot_error", rot_error, on_step=False, on_epoch=True)
+
+        if self.args.depth_loss:
+            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
 
         return loss
 
@@ -296,7 +306,7 @@ def train():
     parser = config_parser()
     args = parser.parse_args()
 
-    network = STaR(args.num_frames, args, gt_poses=None)
+    network = STaR(args.num_frames, args)
 
     if args.appearance_ckpt_path:
         load_star_network_from_ckpt(args.appearance_ckpt_path, network)
@@ -318,7 +328,7 @@ def train():
     )
 
     ckpt_cb = ModelCheckpoint(
-        dirpath=f"ckpts/online/{logger.version}/{args.expname}",
+        dirpath=f"ckpts/online/{logger.version}",
         filename="{epoch:d}",
         every_n_epochs=epoch_val,
         save_on_train_epoch_end=True,

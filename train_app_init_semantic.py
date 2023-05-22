@@ -195,7 +195,7 @@ def train():
     logger.experiment.config.update(args)
 
     ckpt_cb = ModelCheckpoint(
-        dirpath=f"ckpts/appinit_semantic/{logger.version}/{args.expname}",
+        dirpath=f"ckpts/appinit_semantic/{logger.version}",
         filename="{epoch:d}",
         every_n_epochs=args.epoch_ckpt,
         save_on_train_epoch_end=True,

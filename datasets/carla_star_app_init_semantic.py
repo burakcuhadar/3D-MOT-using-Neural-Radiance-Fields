@@ -71,6 +71,9 @@ class StarAppInitSemanticDataset(Dataset):
             self.target_rgbs_noncar = target_rgbs[noncar_mask]
 
     def load_imgs_poses(self, args):
+        # How many images we have for one frame: rgb, semantic, (depth)
+        img_num_for_one_frame = 3 if args.has_depth_data else 2
+
         extrinsics = np.load(
             os.path.join(args.datadir, "extrinsics.npy"), allow_pickle=True
         ).item()
@@ -96,8 +99,10 @@ class StarAppInitSemanticDataset(Dataset):
             if self.split == "train":
                 imgpaths = []
                 semanticimgpaths = []
-                # :3 since there are also semantic and depth images
-                for path in sorted(glob(cam + "*.png"), key=natural_keys)[:3]:
+
+                for path in sorted(glob(cam + "*.png"), key=natural_keys)[
+                    :img_num_for_one_frame
+                ]:
                     if path.endswith("_semantic.png"):
                         semanticimgpaths.append(path)
                     elif path.endswith("_depth.png"):

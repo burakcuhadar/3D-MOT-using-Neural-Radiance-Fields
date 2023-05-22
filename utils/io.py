@@ -52,6 +52,11 @@ def config_parser():
         default=15,
         help="number of object poses in the dataset",
     )
+    parser.add_argument(
+        "--has_depth_data",
+        action="store_true",
+        help="whether the dataset contains depth images in addition to semantic and rgb",
+    )
 
     # training options
     parser.add_argument(
@@ -394,5 +399,11 @@ def config_parser():
     parser.add_argument(
         "--mixed_precision", action="store_true", help="train with mixed precision"
     )
+
+    # DSNerf options
+    parser.add_argument(
+        "--depth_loss", action="store_true", help="train with depth loss"
+    )
+    parser.add_argument("--depth_lambda", type=float, help="depth lambda used for loss")
 
     return parser

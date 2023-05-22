@@ -1,8 +1,11 @@
 expname = lightning_appinit
 basedir = ./logs
 datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
-dataset_type = carla_star
+has_depth_data = True
 num_frames = 17
+
+depth_loss = True
+depth_lambda = 0.01
 
 #TODO eliminate use_viewdirs
 use_viewdirs = True
@@ -36,7 +39,7 @@ mixed_precision = False
 
 
 no_batching = False
-epochs_appearance = 80
+epochs_appearance = 800
 epoch_ckpt = 1
 #TODO eliminate epoch_print?
 epoch_print = 1

@@ -1,4 +1,5 @@
 import os
+import wandb
 import numpy as np
 import torch
 import pytorch_lightning as pl
@@ -71,15 +72,26 @@ class StarAppInit(pl.LightningModule):
 
         img_loss = img2mse(result["rgb"], batch["target"])
         loss = img_loss
-        psnr = mse2psnr(img_loss)
         img_loss0 = img2mse(result["rgb0"], batch["target"])
         loss = loss + img_loss0
+
+        if self.args.depth_loss:
+            # depth_loss = img2mse(result["depth"], batch["target_depth"])
+            depth_loss = torch.mean(
+                ((result["depth"] - batch["target_depth"]) / batch["target_depth"]) ** 2
+            )
+            loss = loss + self.args.depth_lambda * depth_loss
+
+        psnr = mse2psnr(img_loss)
         psnr0 = mse2psnr(img_loss0)
 
         self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True)
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/psnr", psnr, on_step=False, on_epoch=True)
         self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
+
+        if self.args.depth_loss:
+            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
 
         return loss
 
@@ -156,7 +168,7 @@ def train():
     parser = config_parser()
     args = parser.parse_args()
 
-    network = STaR(args.num_frames, args, gt_poses=None)
+    network = STaR(args.num_frames, args)
     model = StarAppInit(args, network)
     # model = torch.compile(model)
 
@@ -165,7 +177,7 @@ def train():
     logger.experiment.config.update(args)
 
     ckpt_cb = ModelCheckpoint(
-        dirpath=f"ckpts/appinit/{logger.version}/{args.expname}",
+        dirpath=f"ckpts/appinit/{logger.version}",
         filename="{epoch:d}",
         every_n_epochs=args.epoch_ckpt,
         save_on_train_epoch_end=True,

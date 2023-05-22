@@ -21,12 +21,13 @@ class StarOnlineDataset(Dataset):
     def __init__(self, args, split, num_frames):
         self.validate_split(split)
         self.split = split
+        self.has_depth_data = args.has_depth_data
         self.num_frames = num_frames
         self.N_samples = args.N_samples
         self.N_rand = args.N_rand
         self.use_batching = not args.no_batching  # TODO eliminate the need for it
 
-        imgs, poses, semantic_imgs = self.load_imgs_poses(args)
+        imgs, poses, semantic_imgs, depth_imgs = self.load_imgs_poses(args)
         H, W, focal = load_intrinsics(args)
         self.gt_relative_poses = self.load_gt_relative_poses(args)
 
@@ -37,6 +38,7 @@ class StarOnlineDataset(Dataset):
         self.imgs = imgs
         self.semantic_imgs = semantic_imgs
         self.poses = poses
+        self.depth_imgs = depth_imgs
 
         self.near = args.near
         self.far = args.far
@@ -45,6 +47,9 @@ class StarOnlineDataset(Dataset):
             self.near *= args.scale_factor
             self.far *= args.scale_factor
             self.poses[:, :3, 3] *= args.scale_factor
+
+            if args.has_depth_data:
+                self.depth_imgs *= args.scale_factor
 
         print("near", self.near)
         print("far", self.far)
@@ -95,7 +100,13 @@ class StarOnlineDataset(Dataset):
             )  # [frame_num, N*H*W]
             self.semantic_rays = semantic_rays
 
+            if args.has_depth_data:
+                self.target_depths = np.reshape(self.depth_imgs, [-1])  # [N*H*W]
+
     def load_imgs_poses(self, args):
+        # How many images we have for one frame: rgb, semantic, (depth)
+        img_num_for_one_frame = 3 if args.has_depth_data else 2
+
         extrinsics = np.load(
             os.path.join(args.datadir, "extrinsics.npy"), allow_pickle=True
         ).item()
@@ -105,6 +116,9 @@ class StarOnlineDataset(Dataset):
         imgs = []
         poses = []
         semantic_imgs = []
+
+        if args.has_depth_data:
+            depth_imgs = []
 
         for i, cam in enumerate(cameras):
             if self.split == "train":
@@ -121,14 +135,20 @@ class StarOnlineDataset(Dataset):
             if self.split == "train":
                 imgpaths = []
                 semantic_imgpaths = []
-                # *3 since there are also semantic and depth images
                 for path in sorted(glob(cam + "*.png"), key=natural_keys)[
-                    : 3 * self.num_frames
+                    : img_num_for_one_frame * self.num_frames
                 ]:
                     if path.endswith("_semantic.png"):
                         semantic_imgpaths.append(path)
                     elif path.endswith("_depth.png"):
-                        pass
+                        depth_img = imageio.imread(path).astype(np.uint8)
+                        normalized = (
+                            depth_img[:, :, 0]
+                            + depth_img[:, :, 1] * 256.0
+                            + depth_img[:, :, 2] * 256.0 * 256.0
+                        ) / (256.0 * 256.0 * 256.0 - 1.0)
+                        in_meters = 1000 * normalized
+                        depth_imgs.append(in_meters.astype(np.float32))
                     else:
                         imgpaths.append(path)
                 semantic_imgs.append(
@@ -153,7 +173,13 @@ class StarOnlineDataset(Dataset):
                 ..., 0
             ]  # [view_num, frame_num, H, W]
 
-        return imgs, poses, semantic_imgs
+        if args.has_depth_data:
+            depth_imgs = np.array(depth_imgs)  # [view num, H, W]
+            print("depth imgs shape", depth_imgs.shape)
+        else:
+            depth_imgs = None
+
+        return imgs, poses, semantic_imgs, depth_imgs
 
     def __len__(self):
         if self.split == "train":
@@ -165,6 +191,8 @@ class StarOnlineDataset(Dataset):
             raise ValueError("invalid dataset split")
 
     def __getitem__(self, idx):
+        target_depth = None
+
         if self.split == "train":
             frame = np.random.randint(low=0, high=self.num_frames)
             frames = np.array([frame])[:, None]  # 1,1
@@ -173,6 +201,9 @@ class StarOnlineDataset(Dataset):
             rays_o = self.rays_o[frame, indices, ...]
             rays_d = self.rays_d[frame, indices, ...]
             target = self.target_rgbs[frame, indices, ...]
+
+            if self.has_depth_data:
+                target_depth = self.target_depths[indices, ...]
 
             if not self.use_batching:
                 raise NotImplementedError
@@ -194,7 +225,13 @@ class StarOnlineDataset(Dataset):
             rays_d = torch.reshape(rays_d, [-1, 3])  # (H*W, 3)
             target = torch.reshape(target, [-1, 3])  # (H*W, 3)
 
-        return {"rays_o": rays_o, "rays_d": rays_d, "target": target, "frames": frames}
+        return {
+            "rays_o": rays_o,
+            "rays_d": rays_d,
+            "target": target,
+            "frames": frames,
+            "target_depth": target_depth,
+        }
 
     # used for debugging
     def find_bounds(self):

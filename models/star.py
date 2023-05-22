@@ -13,10 +13,9 @@ from utils.io import device
 
 
 class STaR(nn.Module):
-    def __init__(self, num_frames, args, gt_poses=None):
+    def __init__(self, num_frames, args):
         super(STaR, self).__init__()
 
-        self.gt_poses = gt_poses
         self.chunk = args.chunk
 
         self.N_importance = args.N_importance
@@ -81,6 +80,7 @@ class STaR(nn.Module):
 
         return result
 
+    '''
     def forward_chunk(
         self,
         pts,
@@ -176,6 +176,95 @@ class STaR(nn.Module):
         viewdirs_dynamic = torch.einsum(
             "nab,nb->na", pose_matrices[:, 0, :3, :3], viewdirs
         )
+
+        raw_alpha_dynamic, raw_rgb_dynamic = dynamic_model(
+            pts_dynamic, viewdirs_dynamic, step=step
+        )
+
+        result = raw2outputs_star(
+            raw_alpha_static,
+            raw_rgb_static,
+            raw_alpha_dynamic,
+            raw_rgb_dynamic,
+            z_vals,
+            rays_d,
+            # From the paper: "we add small Gaussian noise to the density outputs during
+            # appearance initialization but turn it off during online training."
+            0,
+            static_model.white_bkgd,
+        )
+
+        return result
+    '''
+
+    def forward_chunk(
+        self,
+        pts,
+        viewdirs,
+        z_vals,
+        rays_d,
+        pose=None,
+        is_coarse=True,
+        object_pose=None,
+        step=None,
+    ):
+        """STaR's forward
+        Args:
+            pts: [N_rays, N_samples, 3]. Points sampled according to stratified sampling.
+            viewdirs: [N_rays, 3]. View directions of rays.
+            z_vals: [N_rays, N_samples]. Integration time.
+            rays_d: [N_rays, 3]. Unnormalized directions of rays.
+            frames: [N_rays,1]. Time steps of the rays. None during appearance init.
+            is_coarse: True if render using coarse models, False if render using fine models
+            object_pose: [4, 4]. Pose of the dynamic object, same for all rays, used in testing.
+        Returns:
+        """
+        N_rays = pts.shape[0]
+        N_samples = pts.shape[1]
+
+        if is_coarse:
+            static_model = self.static_coarse_nerf
+            dynamic_model = self.dynamic_coarse_nerf
+        else:
+            static_model = self.static_fine_nerf
+            dynamic_model = self.dynamic_fine_nerf
+
+        raw_alpha_static, raw_rgb_static = static_model(pts, viewdirs, step=None)
+
+        # During appearance initialization only static part is trained
+        if pose is None and object_pose is None:
+            return raw2outputs(
+                raw_alpha_static,
+                raw_rgb_static,
+                z_vals,
+                rays_d,
+                static_model.raw_noise_std if self.training else 0,
+                static_model.white_bkgd,
+                ret_entropy=False,
+            )
+
+        if object_pose is not None:
+            raise NotImplementedError  # implement for testing with different ojbect poses
+        elif len(pose.shape) == 2:
+            pose_matrix = pose
+        elif len(pose.shape) == 1:
+            rot = pose[3:]
+            pose_matrix = torch.eye(4, device=pts.device, dtype=torch.float32)
+            pose_matrix[:3, :3] = SO3.exp(rot).matrix()[:3, :3]
+            pose_matrix[:3, 3] = pose[:3]
+        else:
+            raise NotImplementedError
+
+        pts_homog = torch.cat(
+            [pts, torch.ones((N_rays, N_samples, 1), device=device)], dim=-1
+        )  # [N_rays, N_samples, 4]
+        pts_homog_flat = pts_homog.reshape((-1, 4))  # [N_rays*N_samples, 4]
+
+        pts_dynamic_homog_flat = torch.einsum("ij,nj->ni", pose_matrix, pts_homog_flat)
+        pts_dynamic_homog = pts_dynamic_homog_flat.reshape((N_rays, N_samples, 4))
+        pts_dynamic = pts_dynamic_homog[..., :3]  # [N_rays, N_samples, 3]
+
+        viewdirs_dynamic = torch.einsum("ij,nj->ni", pose_matrix[:3, :3], viewdirs)
 
         raw_alpha_dynamic, raw_rgb_dynamic = dynamic_model(
             pts_dynamic, viewdirs_dynamic, step=step

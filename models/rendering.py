@@ -125,7 +125,7 @@ def render_star_appinit(
 
     result = {}
     result.update(result_fine)
-    for k, v in result_fine.items():
+    for k, v in result_coarse.items():
         result[k + "0"] = v
     result["z_std"] = z_std
 
@@ -178,7 +178,7 @@ def render_nerf(
 
     result = {}
     result.update(result_fine)
-    for k, v in result_fine.items():
+    for k, v in result_coarse.items():
         result[k + "0"] = v
     result["z_std"] = z_std
 
