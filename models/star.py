@@ -9,14 +9,23 @@ from lietorch import SO3, SE3
 
 from models.nerf import NeRF
 from models.rendering import raw2outputs, raw2outputs_star
-from utils.io import device
+
+
+# For type checking of pytorch tensors at runtime
+from torchtyping import TensorType, patch_typeguard
+from typeguard import typechecked
+from .types import StarNetworkOutput, NerfNetworkOutput
+from typing import Union, Optional
+
+patch_typeguard()
 
 
 class STaR(nn.Module):
-    def __init__(self, num_frames, args):
+    def __init__(self, args):
         super(STaR, self).__init__()
 
         self.chunk = args.chunk
+        self.far_dist = args.far_dist
 
         self.N_importance = args.N_importance
 
@@ -38,18 +47,20 @@ class STaR(nn.Module):
             + list(self.dynamic_fine_nerf.parameters())
         )
 
+    @typechecked
     def forward(
         self,
-        pts,
-        viewdirs,
-        z_vals,
-        rays_d,
-        pose=None,
+        pts: TensorType["num_rays", "num_samples", 3],
+        viewdirs: TensorType["num_rays", 3],
+        z_vals: TensorType["num_rays", "num_samples"],
+        rays_d: TensorType["num_rays", 3],
+        pose: Optional[Union[TensorType[4, 4], TensorType[6]]] = None,
         is_coarse=True,
         object_pose=None,
         step=None,
-    ):
-        result = defaultdict(list)
+    ) -> Union[NerfNetworkOutput, StarNetworkOutput]:
+        # result = defaultdict(list)
+        result = {}
 
         for i in range(0, pts.shape[0], self.chunk):
             end_i = min(pts.shape[0], i + self.chunk)
@@ -70,7 +81,10 @@ class STaR(nn.Module):
             )
 
             for k, v in chunk_result.items():
-                result[k] += [v]
+                if i == 0:
+                    result[k] = [v]
+                else:
+                    result[k] += [v]
 
         for k, v in result.items():
             if len(result[k][0].shape) == 0:
@@ -197,28 +211,18 @@ class STaR(nn.Module):
         return result
     '''
 
+    @typechecked
     def forward_chunk(
         self,
-        pts,
-        viewdirs,
-        z_vals,
-        rays_d,
-        pose=None,
+        pts: TensorType["num_rays", "num_samples", 3],
+        viewdirs: TensorType["num_rays", 3],
+        z_vals: TensorType["num_rays", "num_samples"],
+        rays_d: TensorType["num_rays", 3],
+        pose: Optional[Union[TensorType[4, 4], TensorType[6]]] = None,
         is_coarse=True,
         object_pose=None,
         step=None,
-    ):
-        """STaR's forward
-        Args:
-            pts: [N_rays, N_samples, 3]. Points sampled according to stratified sampling.
-            viewdirs: [N_rays, 3]. View directions of rays.
-            z_vals: [N_rays, N_samples]. Integration time.
-            rays_d: [N_rays, 3]. Unnormalized directions of rays.
-            frames: [N_rays,1]. Time steps of the rays. None during appearance init.
-            is_coarse: True if render using coarse models, False if render using fine models
-            object_pose: [4, 4]. Pose of the dynamic object, same for all rays, used in testing.
-        Returns:
-        """
+    ) -> Union[NerfNetworkOutput, StarNetworkOutput]:
         N_rays = pts.shape[0]
         N_samples = pts.shape[1]
 
@@ -241,22 +245,21 @@ class STaR(nn.Module):
                 static_model.raw_noise_std if self.training else 0,
                 static_model.white_bkgd,
                 ret_entropy=False,
+                far_dist=self.far_dist,
             )
 
-        if object_pose is not None:
-            raise NotImplementedError  # implement for testing with different ojbect poses
+        if object_pose is not None or len(pose.shape) not in [2, 1]:
+            raise NotImplementedError
         elif len(pose.shape) == 2:
             pose_matrix = pose
-        elif len(pose.shape) == 1:
+        else:
             rot = pose[3:]
             pose_matrix = torch.eye(4, device=pts.device, dtype=torch.float32)
             pose_matrix[:3, :3] = SO3.exp(rot).matrix()[:3, :3]
             pose_matrix[:3, 3] = pose[:3]
-        else:
-            raise NotImplementedError
 
         pts_homog = torch.cat(
-            [pts, torch.ones((N_rays, N_samples, 1), device=device)], dim=-1
+            [pts, torch.ones((N_rays, N_samples, 1), device=pts.device)], dim=-1
         )  # [N_rays, N_samples, 4]
         pts_homog_flat = pts_homog.reshape((-1, 4))  # [N_rays*N_samples, 4]
 
@@ -270,7 +273,7 @@ class STaR(nn.Module):
             pts_dynamic, viewdirs_dynamic, step=step
         )
 
-        result = raw2outputs_star(
+        return raw2outputs_star(
             raw_alpha_static,
             raw_rgb_static,
             raw_alpha_dynamic,
@@ -281,6 +284,5 @@ class STaR(nn.Module):
             # appearance initialization but turn it off during online training."
             0,
             static_model.white_bkgd,
+            far_dist=self.far_dist,
         )
-
-        return result

@@ -4,19 +4,32 @@ datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/da
 has_depth_data = True
 num_frames = 16
 
-
+# without depth supervision
 #appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/8nu6o4lp/lightning_appinit/epoch=79.ckpt
-appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mnj18chc/epoch=70.ckpt
+# with depth supervision (depth loss, without masking)
+#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mnj18chc/epoch=70.ckpt
 
-load_gt_poses = True
-noisy_pose_init = False
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/s7l0s0tf/epoch=64.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/s7o7h9ls/epoch=182.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/3uzu10x3/epoch=170.ckpt
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/3uzu10x3/epoch=65.ckpt
+
+car_sample_ratio = 0
+
+load_gt_poses = False
+noisy_pose_init = True
+
+#depth_loss = True
+#depth_lambda = 0.01
+far_dist = 1e10
+
 
 accumulate_grad_batches = 1
 
 lrate = 5e-4
 lrate_static = 5e-4
 lrate_dynamic = 5e-4
-lrate_decay_steps = [1000]
+lrate_decay_steps = [80]
 lrate_decay_rate = 0.5
 
 lrate_pose = 5e-4
@@ -37,7 +50,7 @@ N_samples = 256
 N_importance = 256
 
 
-#N_rand = 600
+#N_rand = 1200
 #mixed_precision = True
 N_rand = 800
 mixed_precision = False
@@ -45,7 +58,6 @@ mixed_precision = False
 
 num_workers = 4
 
-no_batching = False
 epochs_online = 10000
 #TODO eliminate epoch_print?
 epoch_print = 1
@@ -61,14 +73,13 @@ epoch_val = 1
 
 online_thres = 1e-3
 initial_num_frames = 5
-entropy_weight = 5e-3
+entropy_weight = 1e-3
 end_barf = -1
 
 
 #TODO these are needed?
 no_test_set = True
 save_video_frames = True
-
 
 
 #TODO eliminate use_viewdirs

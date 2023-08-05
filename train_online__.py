@@ -4,9 +4,8 @@ import torch
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 from torch.utils.data import DataLoader
-from models.star import STaR
+from models.star__ import STaR
 import torch.nn as nn
-from tqdm import tqdm
 
 import imageio
 
@@ -23,15 +22,15 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning import Trainer, seed_everything
 
-from models.rendering import render_star_online, sample_pts
-from models.rendering import mse2psnr, img2mse, to8b
+from models.rendering__ import render_star_online, sample_pts
+from models.rendering__ import mse2psnr, img2mse, to8b
 from models.loss import compute_sigma_loss, compute_depth_loss
-from datasets.carla_star_online import StarOnlineDataset
+from datasets.carla_star_online__ import StarOnlineDataset
 from optimizer.hybrid_optimizer import HybridOptim, HybridLRS
 from callbacks.online_training_callback import StarOnlineCallback
-from utils.logging import log_val_table_online, log_test_table_online
+from utils.logging__ import log_val_table_online, log_test_table_online
 from utils.visualization import visualize_depth
-from utils.metrics import get_pose_metrics, evaluate_rpe
+from utils.metrics import get_pose_metrics_multi
 from utils.io import *
 
 
@@ -57,7 +56,7 @@ class StarOnline(pl.LightningModule):
 
         self.register_parameter(
             "poses",
-            nn.Parameter(torch.zeros((args.num_frames - 1, 6)), requires_grad=True),
+            nn.Parameter(torch.zeros((args.num_vehicles, args.num_frames - 1, 6)), requires_grad=True),
         )
 
         print("self.poses", self.poses)
@@ -100,9 +99,9 @@ class StarOnline(pl.LightningModule):
         elif self.trainer.testing:
             pose = batch["object_pose"]
         else:
-            pose0 = torch.zeros((1, 6), requires_grad=False, device=self.device)
-            poses = torch.cat((pose0, self.poses), dim=0)
-            pose = poses[batch["frames"][0]][0]
+            pose0 = torch.zeros((self.args.num_vehicles, 1, 6), requires_grad=False, device=self.device)
+            poses = torch.cat((pose0, self.poses), dim=1)
+            pose = poses[:, batch["frames"][0], ...][:, 0] # num_vehicles, 6
 
         return render_star_online(
             self.star_network,
@@ -168,8 +167,8 @@ class StarOnline(pl.LightningModule):
                     "lr": self.args.lrate_static,
                 },
                 {
-                    "params": list(self.star_network.dynamic_coarse_nerf.parameters())
-                    + list(self.star_network.dynamic_fine_nerf.parameters()),
+                    "params": list(self.star_network.dynamic_coarse_nerfs.parameters())
+                    + list(self.star_network.dynamic_fine_nerfs.parameters()),
                     "lr": self.args.lrate_dynamic,
                 },
             ],
@@ -206,7 +205,6 @@ class StarOnline(pl.LightningModule):
         val_mse = img2mse(result["rgb"], batch["target"])
         psnr = mse2psnr(val_mse)
 
-        # TODO does this gather for multi gpu setup correctly?
         self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/psnr", psnr, on_step=False, on_epoch=True)
 
@@ -241,12 +239,12 @@ class StarOnline(pl.LightningModule):
             .numpy(),
             "rgb_static0",
         )
-        rgb_dynamic0 = to8b(
-            torch.reshape(result["rgb_dynamic0"], (val_H, val_W, 3))
+        rgb_dynamic0s = to8b(
+            result["rgb_dynamic0"].transpose(0, 1).reshape((self.args.num_vehicles, val_H, val_W, 3))
             .cpu()
             .detach()
             .numpy(),
-            "rgb_dynamic0",
+            "rgb_dynamic0s",
         )
         rgb_static = to8b(
             torch.reshape(result["rgb_static"], (val_H, val_W, 3))
@@ -255,55 +253,53 @@ class StarOnline(pl.LightningModule):
             .numpy(),
             "rgb_static",
         )
-        rgb_dynamic = to8b(
-            torch.reshape(result["rgb_dynamic"], (val_H, val_W, 3))
+        rgb_dynamics = to8b(
+            result["rgb_dynamic"].transpose(0, 1).reshape((self.args.num_vehicles, val_H, val_W, 3))
             .cpu()
             .detach()
             .numpy(),
-            "rgb_dynamic",
+            "rgb_dynamics",
         )
         depth_static = visualize_depth(result["depth_static"]).reshape(
             (val_H, val_W, 3)
         )
-        depth_dynamic = visualize_depth(result["depth_dynamic"]).reshape(
-            (val_H, val_W, 3)
-        )
+        depth_dynamics = visualize_depth(result["depth_dynamic"].transpose(0, 1), val_H, val_W)
         depth_static0 = visualize_depth(result["depth_static0"]).reshape(
             (val_H, val_W, 3)
         )
-        depth_dynamic0 = visualize_depth(result["depth_dynamic0"]).reshape(
-            (val_H, val_W, 3)
-        )
+        depth_dynamic0s = visualize_depth(result["depth_dynamic0"].transpose(0, 1), val_H, val_W)
 
         log_val_table_online(
             self.logger,
             self.current_epoch,
             rgb,
             target,
-            rgb_dynamic,
+            rgb_dynamics,
             rgb_static,
             depth,
-            depth_dynamic,
+            depth_dynamics,
             depth_static,
             rgb0,
-            rgb_dynamic0,
+            rgb_dynamic0s,
             rgb_static0,
             depth0,
-            depth_dynamic0,
+            depth_dynamic0s,
             depth_static0,
             z_std,
         )
 
         # Log pose metrics
-        trans_error, rot_error, last_trans_error, last_rot_error = get_pose_metrics(
-            self.poses[0 : self.current_frame_num - 1, ...],
-            batch["gt_relative_poses"][1 : self.current_frame_num, ...],
+        trans_error, rot_error, last_trans_error, last_rot_error = get_pose_metrics_multi(
+            self.poses[:, 0 : self.current_frame_num - 1, ...],
+            batch["gt_relative_poses"][:, 1 : self.current_frame_num, ...],
         )
-        self.log("val/trans_error", trans_error)
-        self.log("val/rot_error", rot_error)
-        self.log("val/last_trans_error", last_trans_error)
-        self.log("val/last_rot_error", last_rot_error)
+        for i in range(self.args.num_vehicles):
+            self.log(f"val/trans_error{i}", trans_error[i])
+            self.log(f"val/rot_error{i}", rot_error[i])
+            self.log(f"val/last_trans_error{i}", last_trans_error[i])
+            self.log(f"val/last_rot_error{i}", last_rot_error[i])
 
+        """TODO adapt for multi vehicle
         rpe_trans_rmse, rpe_rot_rmse = evaluate_rpe(
             self.poses[: self.current_frame_num - 1],
             self.train_dataset.gt_relative_poses_matrices[
@@ -312,8 +308,10 @@ class StarOnline(pl.LightningModule):
         )
         self.log("val/rpe_trans_rmse", rpe_trans_rmse)
         self.log("val/rpe_rot_rmse", rpe_rot_rmse)
+        """
 
     def test_step(self, batch, batch_idx):
+        #TODO adapt for multi vehicle
         result = self(batch)
 
         test_H = self.test_dataset.H
@@ -400,6 +398,7 @@ class StarOnline(pl.LightningModule):
         self.test_rgb_dynamics.append(rgb_dynamic)
 
     def on_test_start(self):
+        #TODO adapt for multi vehicle
         self.video_basepath = os.path.join("videos", self.logger.version)
         self.test_rgbs = []
         self.test_depths = []
@@ -407,6 +406,7 @@ class StarOnline(pl.LightningModule):
         self.test_rgb_dynamics = []
 
     def on_test_end(self):
+        #TODO adapt for multi vehicle
         self.test_rgbs = np.stack(self.test_rgbs, 0)
         self.test_depths = np.stack(self.test_depths, 0)
         self.test_rgb_statics = np.stack(self.test_rgb_statics, 0)
@@ -421,27 +421,27 @@ class StarOnline(pl.LightningModule):
         imageio.mimwrite(rgb_static_path, self.test_rgb_statics, fps=30, quality=8)
         imageio.mimwrite(rgb_dynamic_path, self.test_rgb_dynamics, fps=30, quality=8)
 
-    """
-    def on_before_optimizer_step(self, optimizer):
-        norms = grad_norm(self, norm_type=2)
-        self.log_dict(norms)
-    """
-
     def setup(self, stage):
         self.train_dataset = StarOnlineDataset(
             self.args,
             "train",
             self.args.num_frames,
             self.args.initial_num_frames,
+            self.args.num_vehicles
         )
         self.val_dataset = StarOnlineDataset(
-            self.args, "val", self.args.num_frames, self.args.initial_num_frames
+            self.args, 
+            "val", 
+            self.args.num_frames, 
+            self.args.initial_num_frames,
+            self.args.num_vehicles
         )
         self.test_dataset = StarOnlineDataset(
             self.args,
             "test",
             self.args.num_frames,
             self.args.initial_num_frames,  # TODO init num frames needed?
+            self.args.num_vehicles
         )
 
         if self.args.load_gt_poses:
@@ -451,24 +451,31 @@ class StarOnline(pl.LightningModule):
             )"""
         elif self.args.noisy_pose_init:
             with torch.no_grad():
-                self.poses += self.train_dataset.get_noisy_gt_relative_poses()[1:].to(
+                self.poses += self.train_dataset.get_noisy_gt_relative_poses()[:, 1:, ...].to(
                     self.device
                 )
-                trans_error, rot_error, last_trans_error, last_rot_error = get_pose_metrics(
-                self.poses[0 : self.current_frame_num - 1, ...],
-                    self.train_dataset.gt_relative_poses[1 : self.current_frame_num, ...].to(self.device),
+                trans_error, rot_error, last_trans_error, last_rot_error = get_pose_metrics_multi(
+                    self.poses[:, 0 : self.current_frame_num - 1, ...],
+                    self.train_dataset.gt_relative_poses[:, 1 : self.current_frame_num, ...].to(self.device),
                 )
                 
-                tqdm.write(f"last trans error {last_trans_error}")
-                tqdm.write(f"last rot error {last_rot_error}")
+                """self.logger.experiment.log({
+                    "val/trans_error": trans_error,
+                    "val/rot_error": rot_error,
+                    "val/last_trans_error": last_trans_error,
+                    "val/last_rot_error": last_rot_error
+                })"""
+                print("trans error", trans_error)
+                print("rot error", rot_error)
+                print("last trans error", last_trans_error)
+                print("last rot error", last_rot_error)
 
-                trans_error, rot_error, _, _ = get_pose_metrics(
+                trans_error, rot_error, _, _ = get_pose_metrics_multi(
                     self.poses,
-                    self.train_dataset.gt_relative_poses[1:, ...].to(self.device),
+                    self.train_dataset.gt_relative_poses[:, 1:, ...].to(self.device),
                 )
-                
-                tqdm.write(f"total trans error {trans_error}")
-                tqdm.write(f"total rot error {rot_error}")
+                print("total trans error", trans_error)
+                print("total rot error", rot_error)
 
         # TODO remove!
         """with torch.no_grad():
@@ -592,7 +599,6 @@ if __name__ == "__main__":
 
     parser = config_parser()
     args = parser.parse_args()
-
     model = create_model(args)
 
     train(args, model)

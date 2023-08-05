@@ -5,7 +5,6 @@ import numpy as np
 import imageio
 import logging
 import time
-import random
 
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
@@ -18,12 +17,12 @@ from utils.dataset import (
     pose_translational,
     pose_spherical,
     se3_log_map,
-    pose_rotational,
+    pose_rotational
 )
 
 
 class StarOnlineDataset(Dataset):
-    def __init__(self, args, split, num_frames, current_frame, start_frame=0):
+    def __init__(self, args, split, num_frames, current_frame, num_vehicles, start_frame=0):
         print(
             f"creating {split} dataset with start_frame={start_frame} num_frames={num_frames}"
         )
@@ -36,14 +35,16 @@ class StarOnlineDataset(Dataset):
         self.N_samples = args.N_samples
         self.N_rand = args.N_rand
         self.car_sample_ratio = args.car_sample_ratio
+        self.num_vehicles = num_vehicles
 
         self.gt_relative_poses = torch.from_numpy(self.load_gt_relative_poses(args))
         self.gt_vehicle_poses = self.get_gt_vehicle_poses(args)
 
         if split == "test":
-            # self.object_poses = np.stack(
+            #TODO adapt for multi vehicles
+            #self.object_poses = np.stack(
             #    [pose_translational(t) for t in np.arange(0.0, 1.0, 0.25)], axis=0
-            # )
+            #)
 
             self.object_poses = np.stack(
                 [pose_rotational(deg) for deg in np.arange(0.0, 360.0, 20.0)], axis=0
@@ -61,6 +62,7 @@ class StarOnlineDataset(Dataset):
             imgs, poses, semantic_imgs, depth_imgs = self.load_imgs_poses(args)
 
         H, W, focal = load_intrinsics(args)
+        
 
         self.H = int(H)
         self.W = int(W)
@@ -132,6 +134,8 @@ class StarOnlineDataset(Dataset):
                     self.target_depths, [num_frames, -1]
                 )  # [num_frames, N*H*W]
 
+            # TODO use also instance segmentation cameras
+
             semantic_rays = np.swapaxes(
                 self.semantic_imgs, 0, 1
             )  # [frame_num, N, H, W]
@@ -141,34 +145,8 @@ class StarOnlineDataset(Dataset):
             self.semantic_rays = semantic_rays
 
             print("semantic rays shape", semantic_rays.shape)
-
-            """
-            car_mask = semantic_rays == 10
-            noncar_mask = semantic_rays != 10
-
-            print("car mask shape", car_mask.shape)
-            print("noncar mask shape", noncar_mask.shape)
-
-            self.rays_o_car = rays_o[car_mask]
-            self.rays_d_car = rays_d[car_mask]
-            self.target_rgbs_car = target_rgbs[car_mask]
-
-            self.rays_o_noncar = rays_o[noncar_mask]
-            self.rays_d_noncar = rays_d[noncar_mask]
-            self.target_rgbs_noncar = target_rgbs[noncar_mask]
-
-            print("rays_o car", self.rays_o_car.shape)
-            print("rays_d car", self.rays_d_car.shape)
-            print("target_rgbs car", self.target_rgbs_car.shape)
-            print("rays_o noncar", self.rays_o_noncar.shape)
-            print("rays_d noncar", self.rays_d_noncar.shape)
-            print("target_rgbs noncar", self.target_rgbs_noncar.shape)
-            """
-
+            
     def load_imgs_poses(self, args):
-        # How many images we have for one frame: rgb, semantic, (depth)
-        # img_num_for_one_frame = 3 if args.has_depth_data else 2
-
         extrinsics = np.load(
             os.path.join(args.datadir, "extrinsics.npy"), allow_pickle=True
         ).item()
@@ -258,17 +236,8 @@ class StarOnlineDataset(Dataset):
 
         if self.split == "train":
             if self.car_sample_ratio == 0:
-                """No semantic rays"""
-                # frame = np.random.randint(low=self.start_frame, high=self.current_frame)
-                frame = random.choice(
-                    [0]
-                    + list(
-                        range(
-                            self.start_frame if self.start_frame != 0 else 1,
-                            self.current_frame,
-                        )
-                    )
-                )
+                """ No semantic rays"""
+                frame = np.random.randint(low=self.start_frame, high=self.current_frame)
                 frames = np.array([frame])[:, None]  # 1,1
 
                 indices = np.random.choice(self.rays_o.shape[1], self.N_rand)
@@ -280,18 +249,9 @@ class StarOnlineDataset(Dataset):
                     target_depth = self.target_depths[frame, indices, ...]
             else:
                 """Semantic rays"""
-                #frame = np.random.randint(low=self.start_frame, high=self.current_frame)
-                frame = random.choice(
-                    [0]
-                    + list(
-                        range(
-                            self.start_frame if self.start_frame != 0 else 1,
-                            self.current_frame,
-                        )
-                    )
-                )
+                frame = np.random.randint(low=self.start_frame, high=self.current_frame)
                 frames = np.array([frame])[:, None]  # 1,1
-
+                
                 car_sample_num = int(self.N_rand * self.car_sample_ratio)
                 noncar_sample_num = self.N_rand - car_sample_num
 
@@ -306,10 +266,8 @@ class StarOnlineDataset(Dataset):
                 target_noncar = self.target_rgbs[frame, noncar_mask, ...]
 
                 car_indices = np.random.choice(rays_o_car.shape[0], car_sample_num)
-                noncar_indices = np.random.choice(
-                    rays_o_noncar.shape[0], noncar_sample_num
-                )
-
+                noncar_indices = np.random.choice(rays_o_noncar.shape[0], noncar_sample_num)
+                
                 rays_o_car = rays_o_car[car_indices]
                 rays_d_car = rays_d_car[car_indices]
                 target_car = target_car[car_indices]
@@ -351,7 +309,7 @@ class StarOnlineDataset(Dataset):
             rays_d = torch.reshape(rays_d, [-1, 3])  # (H*W, 3)
             target = None
             frames = None
-            object_pose = self.object_poses[idx, ...]
+            object_pose = self.object_poses[idx, ...] #TODO adapt for multi vehicle dataset
 
         return {
             "rays_o": rays_o,
@@ -386,78 +344,79 @@ class StarOnlineDataset(Dataset):
 
     # Used for debugging
     def get_gt_vehicle_poses(self, args):
-        pose_files = sorted(glob(args.datadir + "/poses/*.npy"), key=natural_keys)
+        vehicle_dirs = sorted(os.listdir(args.datadir + "/poses/"), key=natural_keys)
         poses = []
+        for i in range(self.num_vehicles):
+            poses.append([])
+            pose_files = sorted(glob(f"{args.datadir}/poses/{vehicle_dirs[i]}/*.npy"), key=natural_keys)
 
-        for f in pose_files:
-            posei = from_ue4_to_nerf(np.load(f))
-            if args.scale_factor > 0:
-                posei[:3, 3] *= args.scale_factor
-            posei_inv = np.eye(4, dtype=np.float32)
-            posei_inv[:3, :3] = posei[:3, :3].T
-            posei_inv[:3, -1] = -posei[:3, :3].T @ posei[:3, -1]
-            poses.append(posei_inv.astype(np.float32))
+            for f in pose_files:
+                posei = from_ue4_to_nerf(np.load(f))
+                if args.scale_factor > 0:
+                    posei[:3, 3] *= args.scale_factor
+                posei_inv = np.eye(4, dtype=np.float32)
+                posei_inv[:3, :3] = posei[:3, :3].T
+                posei_inv[:3, -1] = -posei[:3, :3].T @ posei[:3, -1]
+                poses[i].append(posei_inv.astype(np.float32))
+
+            poses[i] = np.stack(poses[i], axis=0)
 
         poses = np.stack(poses, axis=0)
+        assert poses.shape == (self.num_vehicles, self.num_frames, 4, 4), "Vehicles poses are not read correctly!"
         poses = torch.from_numpy(poses)
         return poses
 
+
     # Used for trans/rot error logging
     def load_gt_relative_poses(self, args):
-        pose_files = sorted(glob(args.datadir + "/poses/*.npy"), key=natural_keys)
-
+        vehicle_dirs = sorted(os.listdir(args.datadir + "/poses/"), key=natural_keys)
         poses_matrices = []
 
-        pose0 = None
-        for i, f in enumerate(pose_files):
-            pose = from_ue4_to_nerf(np.load(f))
-            if args.scale_factor > 0:
-                pose[:3, 3] *= args.scale_factor
-            if i == 0:
-                # pose0_inv = invert_transformation(pose)
-                pose0 = pose.astype(np.float32)
-                poses_matrices.append(np.eye(4, dtype=np.float32))
-            else:
-                pose_inv = invert_transformation(pose)
-                # posei_0 = pose_inv @ pose0.numpy()
-                posei_0 = pose0 @ pose_inv  
-                poses_matrices.append(posei_0)
-                # for pytorch3d 4x4 format
-                """posei_0_ = np.eye(4, dtype=np.float32)
-                posei_0_[:3, :3] = posei_0[:3, :3]
-                posei_0_[3, :3] = posei_0[:3, 3]
-                poses.append(posei_0_)"""
+        for j in range(self.num_vehicles):
+            pose_files = sorted(glob(f"{args.datadir}/poses/{vehicle_dirs[j]}/*.npy"), key=natural_keys)
+            poses_matrices.append([])
+
+            for i, f in enumerate(pose_files):
+                pose = from_ue4_to_nerf(np.load(f))
+                if args.scale_factor > 0:
+                    pose[:3, 3] *= args.scale_factor
+                if i == 0:
+                    pose0 = pose.astype(np.float32)
+                    poses_matrices[-1].append(np.eye(4, dtype=np.float32))
+                else:
+                    pose_inv = invert_transformation(pose)
+                    posei_0 = pose0 @ pose_inv
+                    poses_matrices[-1].append(posei_0)
+            
+            poses_matrices[-1] = np.stack(poses_matrices[-1], axis=0)
 
         poses_matrices = np.stack(poses_matrices, axis=0)
+
         with torch.no_grad():
             self.gt_relative_poses_matrices = torch.from_numpy(poses_matrices)
 
-        poses = se3_log_map(poses_matrices)  # num_frames, 6
+        poses = np.zeros((self.num_vehicles, self.num_frames, 6), dtype=np.float32)
+        for j in range(self.num_vehicles):
+            poses[j, :, :] = se3_log_map(poses_matrices[j])
+
+        assert poses_matrices.shape == (self.num_vehicles, self.num_frames, 4, 4), "Vehicles poses are not read correctly!"
+        assert poses.shape == (self.num_vehicles, self.num_frames, 6), "Vehicles poses are not read correctly!"
 
         return poses
 
+    @torch.no_grad()
     def get_noisy_gt_relative_poses(self):
         print("gt relative poses", self.gt_relative_poses)
-        """noise = (
-            torch.randn((self.gt_relative_poses.shape[0] - 1, 6), dtype=torch.float32)
-            / 100.0
-        )
+        
         noisy_poses = torch.zeros_like(self.gt_relative_poses)
-        noisy_poses += self.gt_relative_poses
-        noisy_poses[1:, :] += noise"""
 
-        rot_noise = (
-            torch.randn((self.gt_relative_poses.shape[0] - 1, 3), dtype=torch.float32)
-            / 10.0
-        )
-        trans_noise = (
-            torch.randn((self.gt_relative_poses.shape[0] - 1, 3), dtype=torch.float32)
-            / 100.0
-        )
-        noisy_poses = torch.zeros_like(self.gt_relative_poses)
-        noisy_poses += self.gt_relative_poses
-        noisy_poses[1:, :3] += trans_noise
-        noisy_poses[1:, 3:] += rot_noise
-
+        for i in range(self.num_vehicles):
+            rot_noise = torch.randn((self.gt_relative_poses.shape[1] - 1, 3), dtype=torch.float32) / 10.0
+            trans_noise = torch.randn((self.gt_relative_poses.shape[1] - 1, 3), dtype=torch.float32) / 100.0
+            noisy_poses[i] += self.gt_relative_poses[i]
+            noisy_poses[i, 1:, :3] += trans_noise
+            noisy_poses[i, 1:, 3:] += rot_noise
+        
         print("noisy poses", noisy_poses)
         return noisy_poses
+        

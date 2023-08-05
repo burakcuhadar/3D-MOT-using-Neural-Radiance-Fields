@@ -1,11 +1,14 @@
 # Adapted from https://vision.in.tum.de/data/datasets/rgbd-dataset/tools#evaluation
 
 import random
-import numpy
+import numpy as np
 import torch
+from lietorch import SO3
 
 
 def get_pose_metrics(poses, gt_poses):
+    assert poses.shape[0] == gt_poses.shape[0]
+
     gt_translation = gt_poses[:, :3]
     gt_rotation = gt_poses[:, 3:]
     translation = poses[:, :3]
@@ -15,8 +18,31 @@ def get_pose_metrics(poses, gt_poses):
         torch.sum((translation - gt_translation) ** 2, dim=1).sqrt()
     )
     rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
-    return trans_error, rot_error
 
+    last_trans_error = torch.sum((translation[-1] - gt_translation[-1]) ** 2).sqrt()
+    last_rot_error = torch.sum(torch.abs(rotation[-1] - gt_rotation[-1]))
+
+    return trans_error, rot_error, last_trans_error, last_rot_error
+
+def get_pose_metrics_multi(poses, gt_poses):
+    assert poses.shape[0] == gt_poses.shape[0]
+    assert poses.shape[1] == gt_poses.shape[1]
+
+    gt_translation = gt_poses[:, :, :3]
+    gt_rotation = gt_poses[:, :, 3:]
+    translation = poses[:, :, :3]
+    rotation = poses[:, :, 3:]
+
+    trans_error = torch.mean(
+        torch.sum((translation - gt_translation) ** 2, dim=2).sqrt(),
+        dim=-1    
+    ) # num_vehicles
+    rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=2).mean(dim=-1)
+
+    last_trans_error = torch.sum((translation[:, -1] - gt_translation[:, -1]) ** 2, dim=-1).sqrt()
+    last_rot_error = torch.sum(torch.abs(rotation[:, -1] - gt_rotation[:, -1]), dim=-1)
+
+    return trans_error, rot_error, last_trans_error, last_rot_error
 
 def find_closest_index(L, t):
     """
@@ -58,14 +84,14 @@ def ominus(a, b):
     Output:
     Relative 3D transformation from a to b.
     """
-    return numpy.dot(numpy.linalg.inv(a), b)
+    return np.dot(np.linalg.inv(a), b)
 
 
 def scale(a, scalar):
     """
     Scale the translational components of a 4x4 homogeneous matrix by a scale factor.
     """
-    return numpy.array(
+    return np.array(
         [
             [a[0, 0], a[0, 1], a[0, 2], a[0, 3] * scalar],
             [a[1, 0], a[1, 1], a[1, 2], a[1, 3] * scalar],
@@ -79,7 +105,7 @@ def compute_distance(transform):
     """
     Compute the distance of the translational component of a 4x4 homogeneous matrix.
     """
-    return numpy.linalg.norm(transform[0:3, 3])
+    return np.linalg.norm(transform[0:3, 3])
 
 
 def compute_angle(transform):
@@ -87,7 +113,7 @@ def compute_angle(transform):
     Compute the rotation angle from a 4x4 homogeneous matrix.
     """
     # an invitation to 3-d vision, p 27
-    return numpy.arccos(min(1, max(-1, (numpy.trace(transform[0:3, 0:3]) - 1) / 2)))
+    return np.arccos(min(1, max(-1, (np.trace(transform[0:3, 0:3]) - 1) / 2)))
 
 
 def distances_along_trajectory(traj):
@@ -180,14 +206,14 @@ def evaluate_trajectory(
     elif param_delta_unit == "rad":
         index_est = rotations_along_trajectory(traj_est, 1)
     elif param_delta_unit == "deg":
-        index_est = rotations_along_trajectory(traj_est, 180 / numpy.pi)
+        index_est = rotations_along_trajectory(traj_est, 180 / np.pi)
     elif param_delta_unit == "f":
         index_est = range(len(traj_est))
     else:
         raise Exception("Unknown unit for delta: '%s'" % param_delta_unit)
 
     if not param_fixed_delta:
-        if param_max_pairs == 0 or len(traj_est) < numpy.sqrt(param_max_pairs):
+        if param_max_pairs == 0 or len(traj_est) < np.sqrt(param_max_pairs):
             pairs = [(i, j) for i in range(len(traj_est)) for j in range(len(traj_est))]
         else:
             pairs = [
@@ -206,7 +232,7 @@ def evaluate_trajectory(
         if param_max_pairs != 0 and len(pairs) > param_max_pairs:
             pairs = random.sample(pairs, param_max_pairs)
 
-    gt_interval = numpy.median([s - t for s, t in zip(stamps_gt[1:], stamps_gt[:-1])])
+    gt_interval = np.median([s - t for s, t in zip(stamps_gt[1:], stamps_gt[:-1])])
     gt_max_time_difference = 2 * gt_interval
 
     result = []
@@ -244,3 +270,79 @@ def evaluate_trajectory(
         )
 
     return result
+
+
+def evaluate_rpe(star_poses, gt_poses):
+    """
+    star_poses: [num_frames, 6], torch.Tensor
+    gt_poses: [num_frames, 4, 4]
+    """
+    assert star_poses.shape[0] == gt_poses.shape[0]
+    num_frames = gt_poses.shape[0]
+
+    traj_gt = {}
+    traj_est = {}
+    for i in range(num_frames):
+        traj_gt[i] = gt_poses[i].cpu().numpy()
+
+        mat_est = np.eye(4, dtype=np.float32)
+        mat_est[:3, :3] = (
+            SO3.exp(star_poses[i, 3:]).matrix().cpu().detach().numpy()[:3, :3]
+        )
+        mat_est[:3, 3] = star_poses[i, :3].cpu().detach().numpy()
+        traj_est[i] = mat_est
+
+    result = evaluate_trajectory(
+        traj_gt,
+        traj_est,
+        param_max_pairs=10000,
+        param_fixed_delta=True,  # TODO?
+        param_delta=1.00,
+    )
+
+    # stamps = np.array(result)[:,0]
+    trans_error = np.array(result)[:, 4]
+    rot_error = np.array(result)[:, 5]
+
+    # print("RPE EVALUATION:")
+    # print("compared_pose_pairs %d pairs" % (len(trans_error)))
+    trans_rmse = np.sqrt(np.dot(trans_error, trans_error) / len(trans_error))
+
+    # print("translational_error.mean %f m" % np.mean(trans_error))
+    # print("translational_error.median %f m" % np.median(trans_error))
+    # print("translational_error.min %f m" % np.min(trans_error))
+    # print("translational_error.std %f m" % np.std(trans_error))
+    # print("translational_error.max %f m" % np.max(trans_error))
+    rot_rmse = np.sqrt(np.dot(rot_error, rot_error) / len(rot_error)) * 180.0 / np.pi
+
+    # print("rotational_error.mean %f deg" % (np.mean(rot_error) * 180.0 / np.pi))
+    # print("rotational_error.median %f deg" % (np.median(rot_error) * 180.0 / np.pi))
+    # print("rotational_error.std %f deg" % (np.std(rot_error) * 180.0 / np.pi))
+    # print("rotational_error.min %f deg" % (np.min(rot_error) * 180.0 / np.pi))
+    # print("rotational_error.max %f deg" % (np.max(rot_error) * 180.0 / np.pi))
+
+    return trans_rmse, rot_rmse
+
+
+def evaluate_ate(star_poses, gt_poses):
+    """
+    star_poses: [num_frames, 6], torch.Tensor
+    gt_poses: [num_frames, 6]
+    """
+    assert star_poses.shape[0] == gt_poses.shape[0]
+
+    gt_trans = gt_poses[:, :3].cpu().detach().numpy()
+    star_trans = star_poses[:, :3].cpu().detach().numpy()
+    diff = (star_trans - gt_trans).T  # [3, num_frames]
+    trans_error = np.sqrt(np.sum(diff * diff, 0))
+
+    # print("compared_pose_pairs %d pairs" % (len(trans_error)))
+    trans_rmse = np.sqrt(np.dot(trans_error, trans_error) / len(trans_error))
+
+    # print("absolute_translational_error.mean %f m" % np.mean(trans_error))
+    # print("absolute_translational_error.median %f m" % np.median(trans_error))
+    # print("absolute_translational_error.std %f m" % np.std(trans_error))
+    # print("absolute_translational_error.min %f m" % np.min(trans_error))
+    # print("absolute_translational_error.max %f m" % np.max(trans_error))
+
+    return trans_rmse

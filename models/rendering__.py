@@ -8,7 +8,7 @@ import numpy as np
 from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
 
-from .types import NerfNetworkOutput, StarNetworkOutput, StarRenderOutput
+from .types__ import NerfNetworkOutput, StarNetworkOutput, StarRenderOutput
 
 patch_typeguard()
 
@@ -208,52 +208,6 @@ def render_nerf(
     return result
 
 
-# TODO remove
-def render_star_appinit_semantic(
-    star_network,
-    pts_car,
-    viewdirs_car,
-    z_vals_car,
-    rays_o_car,
-    rays_d_car,
-    pts_noncar,
-    viewdirs_noncar,
-    z_vals_noncar,
-    rays_o_noncar,
-    rays_d_noncar,
-    N_importance,
-    far_dist,
-):
-    render_car = render_nerf(
-        star_network.dynamic_coarse_nerf,
-        star_network.dynamic_fine_nerf,
-        pts_car,
-        viewdirs_car,
-        z_vals_car,
-        rays_o_car,
-        rays_d_car,
-        N_importance,
-        far_dist,
-    )
-
-    render_noncar = render_nerf(
-        star_network.static_coarse_nerf,
-        star_network.static_fine_nerf,
-        pts_noncar,
-        viewdirs_noncar,
-        z_vals_noncar,
-        rays_o_noncar,
-        rays_d_noncar,
-        N_importance,
-        far_dist,
-    )
-
-    result = {f"{k}_car": v for k, v in render_car.items()}
-    for k, v in render_noncar.items():
-        result[f"{k}_noncar"] = v
-
-    return result
-
 
 @typechecked
 def render_star_online(
@@ -264,7 +218,7 @@ def render_star_online(
     rays_o: TensorType["num_rays", 3],
     rays_d: TensorType["num_rays", 3],
     N_importance: int,
-    pose: Union[TensorType[4, 4], TensorType[6]],
+    pose: Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 6]],
     step: Optional[int] = None,
 ) -> StarRenderOutput:
     if N_importance <= 0:
@@ -385,8 +339,8 @@ def raw2outputs(
 def raw2outputs_star(
     raw_alpha_static: TensorType["num_rays", "num_samples"],
     raw_rgb_static: TensorType["num_rays", "num_samples", 3],
-    raw_alpha_dynamic: TensorType["num_rays", "num_samples"],
-    raw_rgb_dynamic: TensorType["num_rays", "num_samples", 3],
+    raw_alpha_dynamic: TensorType["num_rays", "num_vehicles", "num_samples"],
+    raw_rgb_dynamic: TensorType["num_rays", "num_vehicles", "num_samples", 3],
     z_vals: TensorType["num_rays", "num_samples"],
     rays_d: TensorType["num_rays", 3],
     raw_noise_std=0,
@@ -405,15 +359,15 @@ def raw2outputs_star(
     dists = dists * torch.norm(rays_d[..., None, :], dim=-1)
 
     rgb_static = torch.sigmoid(raw_rgb_static)  # [N_rays, N_samples, 3]
-    rgb_dynamic = torch.sigmoid(raw_rgb_dynamic)  # [N_rays, N_samples, 3]
+    rgb_dynamic = torch.sigmoid(raw_rgb_dynamic)  # [N_rays, num_vehicles, N_samples, 3]
 
     noise = 0.0
     if raw_noise_std > 0.0:
         noise = torch.randn(raw_alpha_static.shape) * raw_noise_std
 
     alpha_static = raw2alpha(raw_alpha_static + noise, dists)  # [N_rays, N_samples]
-    alpha_dynamic = raw2alpha(raw_alpha_dynamic + noise, dists)  # [N_rays, N_samples]
-    alpha_total = raw2alpha(raw_alpha_static + noise + raw_alpha_dynamic + noise, dists)
+    alpha_dynamic = raw2alpha(raw_alpha_dynamic + noise, dists[:, None, :])  # [N_rays, num_vehicles, N_samples]
+    alpha_total = raw2alpha(raw_alpha_static + noise + raw_alpha_dynamic.sum(dim=1) + noise, dists)
 
     T_s = torch.cumprod(
         torch.cat(
@@ -428,14 +382,13 @@ def raw2outputs_star(
     T_d = torch.cumprod(
         torch.cat(
             [
-                torch.ones((alpha_dynamic.shape[0], 1), device=device),
+                torch.ones((alpha_dynamic.shape[0], alpha_dynamic.shape[1], 1), device=device),
                 1.0 - alpha_dynamic + 1e-10,
             ],
             -1,
         ),
         -1,
-    )[:, :-1]
-    # T = T_s * T_d
+    )[..., :-1] # N_rays, num_vehicles, N_samples
     T = torch.cumprod(
         torch.cat(
             [
@@ -450,7 +403,7 @@ def raw2outputs_star(
         T[..., None]
         * (
             alpha_static[..., None] * rgb_static
-            + alpha_dynamic[..., None] * rgb_dynamic
+            + torch.sum(alpha_dynamic[..., None] * rgb_dynamic, dim=1)
         ),
         dim=-2,
     )
@@ -459,11 +412,13 @@ def raw2outputs_star(
     rgb_map_static = torch.sum(
         T_s[..., None] * alpha_static[..., None] * rgb_static, dim=-2
     )
+    
     rgb_map_dynamic = torch.sum(
         T_d[..., None] * alpha_dynamic[..., None] * rgb_dynamic, dim=-2
-    )
-    dynamic_weights = T_d * alpha_dynamic
-    depth_dynamic = torch.sum(dynamic_weights * z_vals, -1)
+    ) # num_vehicles, N_rays, 3
+    dynamic_weights = T_d * alpha_dynamic # N_rays, num_vehicles, N_samples
+    depth_dynamic = torch.sum(dynamic_weights * z_vals[:, None, :], -1) # N_rays, num_vehicles
+
     static_weights = T_s * alpha_static
     depth_static = torch.sum(static_weights * z_vals, -1)
 
@@ -503,7 +458,7 @@ def raw2outputs_star(
     }
 
 
-def compute_entropy(alpha_static, alpha_dynamic=None):
+def compute_entropy(alpha_static, alpha_dynamic):
     eps = torch.finfo(alpha_static.dtype).eps
     alpha_static_clamp = alpha_static.clamp(min=eps, max=1 - eps)
     alpha_dynamic_clamp = alpha_dynamic.clamp(min=eps, max=1 - eps)
@@ -512,22 +467,23 @@ def compute_entropy(alpha_static, alpha_dynamic=None):
         alpha_static * torch.log(alpha_static_clamp)
         + (1 - alpha_static) * torch.log1p(-alpha_static_clamp)
     )
+    # [N_rays, num_vehicles, N_samples]
     entropy += -torch.mean(
         alpha_dynamic * torch.log(alpha_dynamic_clamp)
         + (1 - alpha_dynamic) * torch.log1p(-alpha_dynamic_clamp)
-    )
+    , (0,2)).sum()
 
-    total_alpha = alpha_static + alpha_dynamic
+    total_alpha = alpha_static + alpha_dynamic.sum(dim=1) # N_rays, N_samples
     static_normed_trans = alpha_static / total_alpha.clamp(min=eps)
     static_normed_trans_clamp = static_normed_trans.clamp(min=eps)
-    dynamic_normed_trans = alpha_dynamic / total_alpha.clamp(min=eps)
+    dynamic_normed_trans = alpha_dynamic / total_alpha.clamp(min=eps)[:, None, :]
     dynamic_normed_trans_clamp = dynamic_normed_trans.clamp(min=eps)
 
     entropy += -torch.mean(
         total_alpha
         * (
             static_normed_trans * static_normed_trans_clamp.log()
-            + dynamic_normed_trans * dynamic_normed_trans_clamp.log()
+            + torch.sum(dynamic_normed_trans * dynamic_normed_trans_clamp.log(), dim=1)
         )
     )
 

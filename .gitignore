@@ -5,3 +5,4 @@ wandb/
 **/__pycache__/
 *.sbatch
 ckpts/
+sbatch/

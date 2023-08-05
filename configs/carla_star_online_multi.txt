@@ -1,0 +1,80 @@
+expname = lightning_online
+basedir = ./logs
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle
+has_depth_data = True
+num_frames = 15
+num_vehicles = 2
+
+#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/nh0qyl6d/epoch=43.ckpt
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/zi0faekg/epoch=80.ckpt
+
+car_sample_ratio = 0
+
+load_gt_poses = False
+noisy_pose_init = True
+
+#depth_loss = True
+#depth_lambda = 0.01
+far_dist = 1e10
+
+
+accumulate_grad_batches = 1
+
+lrate = 5e-4
+lrate_static = 5e-4
+lrate_dynamic = 5e-4
+lrate_decay_steps = [80]
+lrate_decay_rate = 0.5
+
+lrate_pose = 5e-4
+pose_lrate_decay_steps = [1000000]
+pose_lrate_decay_rate = 0.5
+
+netdepth = 8
+netdepth_fine = 8
+netwidth = 256
+netwidth_fine = 256
+
+chunk = 8192
+netchunk = 16384
+
+scale_factor = 0.01
+
+N_samples = 256
+N_importance = 256
+
+
+#N_rand = 1200
+#mixed_precision = True
+N_rand = 800
+mixed_precision = False
+
+
+num_workers = 4
+
+epochs_online = 10000
+#TODO eliminate epoch_print?
+epoch_print = 1
+epoch_val = 1
+
+#no_batching = True
+#epochs_appearance = 5000
+#epochs_online = 50000
+#epoch_ckpt = 50
+#epoch_print = 1
+#epoch_val = 25
+
+
+online_thres = 1e-3
+initial_num_frames = 5
+entropy_weight = 1e-3
+end_barf = -1
+
+
+#TODO these are needed?
+no_test_set = True
+save_video_frames = True
+
+
+#TODO eliminate use_viewdirs
+use_viewdirs = True

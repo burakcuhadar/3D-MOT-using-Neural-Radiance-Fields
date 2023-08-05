@@ -1,14 +1,15 @@
 expname = lightning_appinit
 basedir = ./logs
-datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_trans
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle
 has_depth_data = True
-num_frames = 17
+num_frames = 15
+num_vehicles = 2
 
-depth_loss = True
-depth_lambda = 0.01
-
-#TODO eliminate use_viewdirs
-use_viewdirs = True
+#depth_loss = True
+#depth_lambda = 0.01
+#sigma_loss = True
+#sigma_lambda = 0.01
+far_dist = 1e10
 
 num_workers = 4
 
@@ -29,7 +30,7 @@ near = 3.0
 far = 80.0
 
 lrate = 5e-4
-lrate_decay = 30
+lrate_decay = 40
 lrate_decay_rate = 0.5
 
 #N_rand = 600
@@ -51,7 +52,7 @@ epoch_val = 1
 #epoch_print = 1
 #epoch_val = 25
 
-appearance_init_thres = 8e-4
+appearance_init_thres = 9e-4
 
 
 
@@ -59,3 +60,5 @@ appearance_init_thres = 8e-4
 no_test_set = True
 save_video_frames = True
 
+#TODO eliminate use_viewdirs
+use_viewdirs = True

@@ -7,17 +7,32 @@ from PIL import Image
 from models.rendering import to8b
 
 
-def visualize_depth(depth, cmap=cv2.COLORMAP_JET):
+def visualize_depth(depth, H=400, W=400, cmap=cv2.COLORMAP_JET):
     """
-    depth: (H, W)
+    depth: (H*W) or (num_vehicles, H*W)
     """
-    x = depth.cpu().numpy()
-    x = np.nan_to_num(x)  # change nan to 0
-    mi = np.min(x)  # get minimum depth
-    ma = np.max(x)
-    x = (x - mi) / (ma - mi + 1e-8)  # normalize to 0~1
-    x = (255 * x).astype(np.uint8)
-    x_ = cv2.applyColorMap(x, cmap)
+    if depth.ndim == 1:
+        x = depth.cpu().numpy()
+        x = np.nan_to_num(x)  # change nan to 0
+        mi = np.min(x)  # get minimum depth
+        ma = np.max(x)
+        x = (x - mi) / (ma - mi + 1e-8)  # normalize to 0~1
+        x = (255 * x).astype(np.uint8)
+        x_ = cv2.applyColorMap(x, cmap)
+    elif depth.ndim == 2:
+        x = depth.cpu().numpy()
+        x = np.nan_to_num(x)  # change nan to 0
+        mi = np.min(x, axis=1)  # get minimum depth, (num_vehicles, )
+        ma = np.max(x, axis=1)
+        mi = np.tile(mi[:, None], (1, x.shape[1]))
+        ma = np.tile(ma[:, None], (1, x.shape[1]))
+        x = (x - mi) / (ma - mi + 1e-8)  # normalize to 0~1, (num_vehicles, H*W)
+        x = (255 * x).astype(np.uint8)
+        x_ = []
+        for i in range(x.shape[0]):
+            x_.append(cv2.applyColorMap(x[i], cmap).reshape((H, W, 3)))
+    else:
+        raise NotImplementedError()
     return x_
 
 

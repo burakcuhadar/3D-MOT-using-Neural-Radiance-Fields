@@ -17,9 +17,8 @@ class StarAppInitDataset(Dataset):
         self.has_depth_data = args.has_depth_data
         self.N_samples = args.N_samples
         self.N_rand = args.N_rand
-        self.use_batching = not args.no_batching  # TODO eliminate the need for it
 
-        imgs, poses, depth_imgs = self.load_imgs_poses(args)
+        imgs, poses, semantic_imgs, depth_imgs = self.load_imgs_poses(args)
         H, W, focal = load_intrinsics(args)
 
         self.H = int(H)
@@ -27,6 +26,7 @@ class StarAppInitDataset(Dataset):
         self.focal = focal
 
         self.imgs = imgs
+        self.semantic_imgs = semantic_imgs
         self.poses = poses
         self.depth_imgs = depth_imgs
 
@@ -68,6 +68,8 @@ class StarAppInitDataset(Dataset):
             self.rays_d = rays_d
             self.target_rgbs = target_rgbs
 
+            self.semantic_rays = np.reshape(semantic_imgs, [-1])  # [N*H*W]
+
             print("rays_o", self.rays_o.shape)
             print("rays_d", self.rays_d.shape)
             print("target_rgbs", self.target_rgbs.shape)
@@ -89,6 +91,7 @@ class StarAppInitDataset(Dataset):
 
         imgs = []
         poses = []
+        semantic_imgs = []
 
         if args.has_depth_data:
             depth_imgs = []
@@ -105,35 +108,42 @@ class StarAppInitDataset(Dataset):
                     continue
             print(cam, "goes to", self.split)
 
-            if self.split == "train":
-                imgpaths = []
-                for path in sorted(glob(cam + "*.png"), key=natural_keys)[
-                    :img_num_for_one_frame
-                ]:
-                    if path.endswith("_semantic.png"):
-                        pass
-                    elif path.endswith("_depth.png"):
-                        depth_img = imageio.imread(path).astype(np.uint8)
-                        normalized = (
-                            depth_img[:, :, 0]
-                            + depth_img[:, :, 1] * 256.0
-                            + depth_img[:, :, 2] * 256.0 * 256.0
-                        ) / (256.0 * 256.0 * 256.0 - 1.0)
-                        in_meters = 1000 * normalized
-                        depth_imgs.append(in_meters.astype(np.float32))
-                    else:
-                        imgpaths.append(path)
-            elif self.split == "val":
-                imgpaths = sorted(glob(cam + "*.png"), key=natural_keys)[:1]
+            imgpaths = []
+            semantic_imgpaths = []
+            for path in sorted(glob(cam + "*.png"), key=natural_keys)[
+                :img_num_for_one_frame
+            ]:
+                if path.endswith("_semantic.png"):
+                    semantic_imgpaths.append(path)
+                elif path.endswith("_depth.png"):
+                    depth_img = imageio.imread(path).astype(np.uint8)
+                    normalized = (
+                        depth_img[:, :, 0]
+                        + depth_img[:, :, 1] * 256.0
+                        + depth_img[:, :, 2] * 256.0 * 256.0
+                    ) / (256.0 * 256.0 * 256.0 - 1.0)
+                    in_meters = 1000 * normalized
+                    depth_imgs.append(in_meters.astype(np.float32))
+                else:
+                    imgpaths.append(path)
+
+            semantic_imgs.append(
+                [imageio.imread(imgpath) for imgpath in semantic_imgpaths]
+            )
 
             imgs.append([imageio.imread(imgpath) for imgpath in imgpaths])
             poses.append(from_ue4_to_nerf(extrinsics[i]))
 
         imgs = (np.array(imgs) / 255.0).astype(np.float32)[
             ..., :3
-        ]  # [view_num, frame_num, H, W, 3]
+        ]  # [view_num, 1, H, W, 3]
         imgs = np.squeeze(imgs, axis=1)
         poses = np.array(poses).astype(np.float32)  # [view_num, 4, 4]
+
+        semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[
+            ..., 0
+        ]  # [view_num, 1, H, W]
+        semantic_imgs = np.squeeze(semantic_imgs, axis=1)
 
         if args.has_depth_data:
             depth_imgs = np.array(depth_imgs)  # [view num, H, W]
@@ -141,7 +151,7 @@ class StarAppInitDataset(Dataset):
         else:
             depth_imgs = None
 
-        return imgs, poses, depth_imgs
+        return imgs, poses, semantic_imgs, depth_imgs
 
     def __len__(self):
         if self.split == "train":
@@ -153,8 +163,6 @@ class StarAppInitDataset(Dataset):
             raise ValueError("invalid dataset split")
 
     def __getitem__(self, idx):
-        target_depth = None
-
         if self.split == "train":
             indices = np.random.choice(len(self.rays_o), self.N_rand)
             rays_o = self.rays_o[indices, ...]
@@ -163,9 +171,6 @@ class StarAppInitDataset(Dataset):
 
             if self.has_depth_data:
                 target_depth = self.target_depths[indices, ...]
-
-            if not self.use_batching:
-                raise NotImplementedError
 
         elif self.split == "val":
             idx = np.random.randint(low=0, high=self.imgs.shape[0])
@@ -179,6 +184,9 @@ class StarAppInitDataset(Dataset):
             rays_o = torch.reshape(rays_o, [-1, 3])  # (H*W, 3)
             rays_d = torch.reshape(rays_d, [-1, 3])  # (H*W, 3)
             target = torch.reshape(target, [-1, 3])  # (H*W, 3)
+
+            if self.has_depth_data:
+                target_depth = self.depth_imgs[idx]
 
         return {
             "rays_o": rays_o,

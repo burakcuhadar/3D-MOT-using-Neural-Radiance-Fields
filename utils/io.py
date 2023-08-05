@@ -3,9 +3,13 @@ import torch
 import random
 import numpy as np
 from collections import OrderedDict
+import logging
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def configure_logger(dirpath, filename):
+    os.makedirs(dirpath)
+    logging.basicConfig(filename=f"{dirpath}/{filename}", level=logging.INFO)
+    logging.info("Logging started.")
 
 
 def create_log_dir(basedir, expname):
@@ -38,6 +42,7 @@ def config_parser():
     import configargparse
 
     parser = configargparse.ArgumentParser()
+    parser.add_argument("--job_id", help="slurm job id")
     parser.add_argument("--config", is_config_file=True, help="config file path")
     parser.add_argument("--expname", type=str, help="experiment name")
     parser.add_argument(
@@ -51,6 +56,12 @@ def config_parser():
         type=int,
         default=15,
         help="number of object poses in the dataset",
+    )
+    parser.add_argument(
+        "--num_vehicles",
+        type=int,
+        default=1,
+        help="number of objects in the dataset",
     )
     parser.add_argument(
         "--has_depth_data",
@@ -163,11 +174,6 @@ def config_parser():
         default=1024 * 64,
         help="""number of pts sent through network in parallel, decrease if running out of 
                               memory""",
-    )
-    parser.add_argument(
-        "--no_batching",
-        action="store_true",
-        help="only take random rays from 1 image at a time",
     )
     parser.add_argument(
         "--ckpt_path", type=str, default=None, help="checkpoint file to load state"
@@ -337,13 +343,11 @@ def config_parser():
     )
     parser.add_argument("--near", type=float, default=3.0, help="near limit for rays")
     parser.add_argument("--far", type=float, default=80.0, help="far limit for rays")
-
-    ## deepvoxels flags
     parser.add_argument(
-        "--shape",
-        type=str,
-        default="greek",
-        help="options : armchair / cube / greek / vase",
+        "--far_dist",
+        type=float,
+        default=1e10,
+        help="the distance between the farthest sample and the sample before that",
     )
 
     ## blender flags
@@ -372,15 +376,6 @@ def config_parser():
         action="store_true",
         help="sampling linearly in disparity rather than depth",
     )
-    parser.add_argument(
-        "--spherify", action="store_true", help="set for spherical 360 scenes"
-    )
-    parser.add_argument(
-        "--llffhold",
-        type=int,
-        default=8,
-        help="will take every 1/N images as LLFF test set, paper uses 8",
-    )
 
     # logging/saving options
     parser.add_argument(
@@ -405,5 +400,19 @@ def config_parser():
         "--depth_loss", action="store_true", help="train with depth loss"
     )
     parser.add_argument("--depth_lambda", type=float, help="depth lambda used for loss")
+    parser.add_argument(
+        "--sigma_loss", action="store_true", help="train with sigma loss"
+    )
+    parser.add_argument("--sigma_lambda", type=float, help="sigma lambda used for loss")
 
     return parser
+
+
+def set_matmul_precision():
+    # Check whether the gpu has tensor cores, in that case set matmul precision
+    major, _ = torch.cuda.get_device_capability(torch.device("cuda"))
+    # Ampere and later leverage tensor cores, where this setting becomes useful
+    ampere_or_later = major >= 8
+    if ampere_or_later:
+        print("Setting matmul precision to medium...")
+        torch.set_float32_matmul_precision("medium")

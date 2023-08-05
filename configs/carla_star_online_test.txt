@@ -1,45 +1,49 @@
-expname = lightning_appinit
+expname = lightning_online_test
 basedir = ./logs
 datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
 has_depth_data = True
 num_frames = 16
 
-#depth_loss = True
-#depth_lambda = 0.01
-#sigma_loss = True
-#sigma_lambda = 0.01
-far_dist = 0.003
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/l1avwstm/epoch=65.ckpt
 
-num_workers = 4
 
+far_dist = 1e10
 
 netdepth = 8
 netdepth_fine = 8
 netwidth = 256
 netwidth_fine = 256
-N_samples = 256
-N_importance = 256
-end_barf = -1
 
-chunk = 5000
-netchunk = 16384
+chunk = 2048
+netchunk = 4096
 
 scale_factor = 0.01
-near = 3.0
-far = 80.0
+
+N_samples = 256
+N_importance = 256
+
+end_barf = -1
+
+
 
 lrate = 5e-4
-lrate_decay = 40
+lrate_static = 5e-4
+lrate_dynamic = 5e-4
+lrate_decay_steps = [120]
 lrate_decay_rate = 0.5
+lrate_pose = 5e-5
+pose_lrate_decay_steps = [1000000]
+pose_lrate_decay_rate = 0.5
 
 #N_rand = 600
 #mixed_precision = True
-N_rand = 1000
+N_rand = 600
 mixed_precision = False
 
 
-epochs_appearance = 800
-epoch_ckpt = 1
+num_workers = 4
+
+epochs_online = 10000
 #TODO eliminate epoch_print?
 epoch_print = 1
 epoch_val = 1
@@ -51,13 +55,17 @@ epoch_val = 1
 #epoch_print = 1
 #epoch_val = 25
 
-appearance_init_thres = 9e-4
+
+online_thres = 8e-4
+initial_num_frames = 5
+entropy_weight = 1e-3
 
 
-
-#TODO are these needed for app init?
+#TODO these are needed?
 no_test_set = True
 save_video_frames = True
+
+
 
 #TODO eliminate use_viewdirs
 use_viewdirs = True

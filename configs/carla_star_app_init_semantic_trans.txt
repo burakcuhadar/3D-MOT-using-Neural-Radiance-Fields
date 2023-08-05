@@ -35,7 +35,6 @@ N_rand = 1000
 mixed_precision = False
 
 
-no_batching = False
 epochs_appearance = 800
 epoch_ckpt = 1
 #TODO eliminate epoch_print?
