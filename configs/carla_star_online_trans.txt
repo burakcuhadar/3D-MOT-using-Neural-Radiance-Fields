@@ -11,10 +11,13 @@ num_frames = 17
 # semantic training
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit_semantic/zks87txr/lightning_appinit_semantic/epoch=60.ckpt
 # depth loss app init
-appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/lhtzz37q/epoch=61.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/lhtzz37q/epoch=61.ckpt
 
-depth_loss = True
-depth_lambda = 0.01
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/37d4mm9t/epoch=52.ckpt
+
+
+#depth_loss = True
+#depth_lambda = 0.01
 
 load_gt_poses = True
 noisy_pose_init = False

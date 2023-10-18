@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from lietorch import SO3, SE3
+import pypose as pp
 
 # from pytorch3d.transforms import se3_exp_map
 
@@ -58,7 +59,7 @@ class STaR(nn.Module):
         viewdirs: TensorType["num_rays", 3],
         z_vals: TensorType["num_rays", "num_samples"],
         rays_d: TensorType["num_rays", 3],
-        pose: Optional[Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 6]]] = None, 
+        pose: Optional[Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 7]]] = None, 
         is_coarse=True,
         object_pose=None,
         step=None,
@@ -105,7 +106,7 @@ class STaR(nn.Module):
         viewdirs: TensorType["num_rays", 3],
         z_vals: TensorType["num_rays", "num_samples"],
         rays_d: TensorType["num_rays", 3],
-        pose: Optional[Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 6]]] = None,
+        pose: Optional[Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 7]]] = None,
         is_coarse=True,
         object_pose=None,
         step=None,
@@ -131,30 +132,42 @@ class STaR(nn.Module):
                 rays_d,
                 static_model.raw_noise_std if self.training else 0,
                 static_model.white_bkgd,
-                ret_entropy=False,
                 far_dist=self.far_dist,
             )
 
-        if object_pose is not None or len(pose.shape) not in [2, 1]:
+        if object_pose is not None or len(pose.shape) not in [3, 2]:
             raise NotImplementedError
         elif len(pose.shape) == 3:
             pose_matrix = pose
+
+            pts_homog = torch.cat(
+                [pts, torch.ones((N_rays, N_samples, 1), device=pts.device)], dim=-1
+            )  # [N_rays, N_samples, 4]
+            pts_homog_flat = pts_homog.reshape((-1, 4))  # [N_rays*N_samples, 4]
+
+            pts_dynamic_homog_flat = torch.einsum("vij,nj->vni", pose_matrix, pts_homog_flat)
+            pts_dynamic_homog = pts_dynamic_homog_flat.reshape((self.num_vehicles, N_rays, N_samples, 4))
+            pts_dynamic = pts_dynamic_homog[..., :3]  # [num_vehicles, N_rays, N_samples, 3]
+
+            viewdirs_dynamic = torch.einsum("vij,nj->vni", pose_matrix[:, :3, :3], viewdirs)
+
         else:
-            pose_matrix = torch.eye(4, device=pts.device, dtype=torch.float32).repeat([self.num_vehicles, 1, 1])
-            rot = pose[:, 3:]
-            pose_matrix[:, :3, :3] = SO3.exp(rot).matrix()[:, :3, :3]
-            pose_matrix[:, :3, 3] = pose[:, :3]
+            #pose_matrix = torch.eye(4, device=pts.device, dtype=torch.float32).repeat([self.num_vehicles, 1, 1])
+            #rot = pose[:, 3:]
+            #pose_matrix[:, :3, :3] = SO3.exp(rot).matrix()[:, :3, :3]
+            #pose_matrix[:, :3, 3] = pose[:, :3]
+            pts_dynamic = []
+            viewdirs_dynamic = []
+            pts_flat = pts.reshape((-1, 3))
+            
+            for i in range(self.num_vehicles):
+                pts_dynamic_flat = pp.SE3(pose[i]).Act(pts_flat)
+                pts_dynamic.append(pts_dynamic_flat.reshape((N_rays, N_samples, 3)).unsqueeze(0))
+                viewdirs_dynamic.append(pp.SO3(pose[i, 3:]).Act(viewdirs).unsqueeze(0))
+            
+            pts_dynamic = torch.cat(pts_dynamic, dim=0)
+            viewdirs_dynamic = torch.cat(viewdirs_dynamic, dim=0)
 
-        pts_homog = torch.cat(
-            [pts, torch.ones((N_rays, N_samples, 1), device=pts.device)], dim=-1
-        )  # [N_rays, N_samples, 4]
-        pts_homog_flat = pts_homog.reshape((-1, 4))  # [N_rays*N_samples, 4]
-
-        pts_dynamic_homog_flat = torch.einsum("vij,nj->vni", pose_matrix, pts_homog_flat) #TODO test
-        pts_dynamic_homog = pts_dynamic_homog_flat.reshape((self.num_vehicles, N_rays, N_samples, 4))
-        pts_dynamic = pts_dynamic_homog[..., :3]  # [num_vehicles, N_rays, N_samples, 3]
-
-        viewdirs_dynamic = torch.einsum("vij,nj->vni", pose_matrix[:, :3, :3], viewdirs)
 
         raw_alpha_dynamic = torch.zeros((N_rays, self.num_vehicles, N_samples), device=pts.device)
         raw_rgb_dynamic = torch.zeros((N_rays, self.num_vehicles, N_samples, 3), device=pts.device)

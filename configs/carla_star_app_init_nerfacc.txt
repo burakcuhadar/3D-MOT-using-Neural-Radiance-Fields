@@ -1,0 +1,44 @@
+expname = lightning_appinit_nerfacc
+basedir = ./logs
+datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
+has_depth_data = True
+num_frames = 16
+
+far_dist = 1e10
+grid_resolution = 128
+grid_nlvl = 1
+render_step_size = 5e-3
+target_sample_batch_size = 65536
+
+num_workers = 4
+
+netdepth = 8
+netwidth = 256
+
+chunk = 4096
+netchunk = 16384
+
+scale_factor = 0.01
+near = 3.0
+far = 80.0
+
+lrate = 5e-4
+lrate_decay = 35
+lrate_decay_rate = 0.33
+
+N_rand = 1024
+mixed_precision = False
+
+
+epochs_appearance = 800
+epoch_ckpt = 1
+epoch_val = 5
+
+appearance_init_thres = 8e-4
+
+#TODO are these needed for app init?
+no_test_set = True
+save_video_frames = True
+
+#TODO eliminate use_viewdirs
+use_viewdirs = True

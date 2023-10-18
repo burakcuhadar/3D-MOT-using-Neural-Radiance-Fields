@@ -1,13 +1,21 @@
 import os
-import numpy as np
 import torch
+import numpy as np
 import pytorch_lightning as pl
+import pypose as pp
+from lietorch import SE3
+from torch import inf
+
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 from torch.utils.data import DataLoader
 from models.star import STaR
 import torch.nn as nn
+from tqdm import tqdm
 
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchmetrics import StructuralSimilarityIndexMeasure
 import imageio
+from einops import rearrange
 
 from pytorch3d.transforms import se3_log_map
 
@@ -30,7 +38,7 @@ from optimizer.hybrid_optimizer import HybridOptim, HybridLRS
 from callbacks.online_training_callback import StarOnlineCallback
 from utils.logging import log_val_table_online, log_test_table_online
 from utils.visualization import visualize_depth
-from utils.metrics import get_pose_metrics
+from utils.metrics import get_pose_metrics, evaluate_rpe
 from utils.io import *
 
 
@@ -46,7 +54,6 @@ def get_scheduler(
     else:
         return None
 
-
 class StarOnline(pl.LightningModule):
     def __init__(self, args, star_network):
         super().__init__()
@@ -54,19 +61,35 @@ class StarOnline(pl.LightningModule):
         self.args = args
         self.star_network = star_network
 
-        self.register_parameter(
+        '''self.register_parameter(
             "poses",
             nn.Parameter(torch.zeros((args.num_frames - 1, 6)), requires_grad=True),
-        )
+        )'''
 
-        print("self.poses", self.poses)
+        self.poses = nn.ParameterList(
+            #[nn.Parameter(torch.zeros(1,7), requires_grad=True) for i in range(args.num_frames-1)]
+            #[nn.Parameter(SE3.Identity(1, dtype=torch.float32).log()) for i in range(args.num_frames-1)]
+            [nn.Parameter(pp.identity_SE3().tensor().unsqueeze(0)) for i in range(args.num_frames-1)]
+        )        
+        print("poses:", self.poses[0].shape)
+        print("len poses:", len(self.poses))
+        '''
+        self.poses = nn.ParameterList(
+            [pp.Parameter(pp.identity_SE3(1, dtype=torch.float32), requires_grad=True)  for i in range(args.num_frames-1)]
+        )
+        '''
 
         self.register_buffer(
             "current_frame_num",
             torch.tensor([args.initial_num_frames], dtype=torch.long),
         )
 
+        self.register_buffer("start_frame", torch.tensor([0], dtype=torch.long))
+
         self.training_fine_losses = []
+
+        #self.loss = nn.HuberLoss(delta=0.5)
+        self.loss = nn.MSELoss()
 
     def forward(self, batch):
         pts, z_vals = sample_pts(
@@ -85,17 +108,20 @@ class StarOnline(pl.LightningModule):
         )  # [N_rays, 3]
 
         if self.args.load_gt_poses:
-            # pose = self.gt_poses[batch["frames"][0, 0]]
-            pose0 = torch.zeros((1, 6), requires_grad=False, device=self.device)
+            """pose0 = torch.zeros((1, 6), requires_grad=False, device=self.device)
             poses = torch.cat((pose0, batch["gt_relative_poses"][1:, ...]), dim=0)
-            pose = poses[batch["frames"][0]][0]
+            pose = poses[batch["frames"][0]][0]"""
+
+            pose = batch["gt_relative_poses"][batch["frames"][0]][0]
+
+            """pose = self.train_dataset.gt_vehicle_poses.to(
+                batch["rays_o"].device
+            )[batch["frames"][0]][0]"""
         elif self.trainer.testing:
             pose = batch["object_pose"]
         else:
-            pose0 = torch.zeros((1, 6), requires_grad=False, device=self.device)
-            # TODO remove
-            """pose0 = self.gt_pose"""
-            poses = torch.cat((pose0, self.poses), dim=0)
+            pose0 = pp.identity_SE3(device=self.device).tensor().unsqueeze(0)
+            poses = torch.cat(([pose0] + [posei for posei in self.poses]), dim=0)
             pose = poses[batch["frames"][0]][0]
 
         return render_star_online(
@@ -113,13 +139,15 @@ class StarOnline(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         result = self(batch)
 
-        img_loss = img2mse(result["rgb"], batch["target"])
+        #img_loss = img2mse(result["rgb"], batch["target"])
+        img_loss = self.loss(result["rgb"], batch["target"])
 
         loss = img_loss
         psnr = mse2psnr(img_loss)
-        img_loss0 = img2mse(result["rgb0"], batch["target"])
+        #img_loss0 = img2mse(result["rgb0"], batch["target"])
+        img_loss0 = self.loss(result["rgb0"], batch["target"])
 
-        loss = loss + img_loss0
+        loss += img_loss0
         psnr0 = mse2psnr(img_loss0)
         loss += self.args.entropy_weight * (result["entropy"] + result["entropy0"])
 
@@ -145,6 +173,7 @@ class StarOnline(pl.LightningModule):
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/psnr", psnr, on_step=False, on_epoch=True)
         self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
+        self.log("train/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
 
         if self.args.depth_loss:
             self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
@@ -170,7 +199,16 @@ class StarOnline(pl.LightningModule):
             lr=self.args.lrate,
             betas=(0.9, 0.999),
         )
-        pose_optimizer = torch.optim.Adam([self.poses], lr=self.args.lrate_pose)
+        pose_optimizer = torch.optim.Adam(self.poses, lr=self.args.lrate_pose)
+        #pose_optimizer = torch.optim.NAdam(self.poses, lr=self.args.lrate_pose)
+        
+        #self.dummy = nn.Parameter(torch.zeros(1,1), requires_grad=True)
+        #pose_optimizer = torch.optim.Adam([self.dummy], lr=self.args.lrate_pose)
+        
+        
+        #pose_optimizer = torch.optim.SGD(self.poses, lr=self.args.lrate_pose)
+        #pose_optimizer = torch.optim.RAdam(self.poses, lr=self.args.lrate_pose)
+        #pose_optimizer = torch.optim.RAdam(self.poses, lr=self.args.lrate_pose)
 
         scheduler = get_scheduler(
             optimizer,
@@ -195,17 +233,30 @@ class StarOnline(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         result = self(batch)
 
-        val_mse = img2mse(result["rgb"], batch["target"])
-        psnr = mse2psnr(val_mse)
-
-        # TODO does this gather for multi gpu setup correctly?
-        self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val/psnr", psnr, on_step=False, on_epoch=True)
-
-        # Log visualizations for the first view (see dataset implementation)
         val_H = self.val_dataset.H
         val_W = self.val_dataset.W
 
+        self.log("val/frame", batch["frames"][0, 0])
+
+        #val_mse = img2mse(result["rgb"], batch["target"])
+        val_mse = self.loss(result["rgb"], batch["target"])
+        psnr = mse2psnr(val_mse)
+        lpips = self.eval_lpips(
+            torch.reshape(result["rgb"], (val_H, val_W, 3)), 
+            torch.reshape(batch["target"], (val_H, val_W, 3))
+        )
+        ssim = self.eval_ssim(
+            torch.reshape(result["rgb"], (val_H, val_W, 3)), 
+            torch.reshape(batch["target"], (val_H, val_W, 3))
+        )
+
+        self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val/psnr", psnr, on_step=False, on_epoch=True)
+        self.log("val/lpips", lpips, on_step=False, on_epoch=True)
+        self.log("val/ssim", ssim, on_step=False, on_epoch=True)
+        self.log("val/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
+
+        # Log visualizations for the first view (see dataset implementation)
         rgb0 = to8b(
             torch.reshape(result["rgb0"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "rgb0",
@@ -267,7 +318,28 @@ class StarOnline(pl.LightningModule):
             (val_H, val_W, 3)
         )
 
-        log_val_table_online(
+        self.logger.log_image(
+            "val/imgs", 
+            [
+                rgb,
+                target,
+                rgb_dynamic,
+                rgb_static,
+                depth,
+                depth_dynamic,
+                depth_static,
+                rgb0,
+                rgb_dynamic0,
+                rgb_static0,
+                depth0,
+                depth_dynamic0,
+                depth_static0,
+                z_std,
+            ], 
+            step=self.global_step
+        )
+
+        """log_val_table_online(
             self.logger,
             self.current_epoch,
             rgb,
@@ -284,16 +356,28 @@ class StarOnline(pl.LightningModule):
             depth_dynamic0,
             depth_static0,
             z_std,
-        )
+        )"""
 
         # Log pose metrics
-        trans_error, rot_error = get_pose_metrics(
-            self.poses[0 : self.current_frame_num, ...],
-            batch["gt_relative_poses"][1 : self.current_frame_num + 1, ...],
-            # self.gt_poses[1 : self.current_frame_num + 1, ...],  # TODO remove
+        trans_error, rot_error, last_trans_error, last_rot_error, rot_error_euler, last_rot_error_euler = get_pose_metrics(
+            torch.cat(list(self.poses[0 : self.current_frame_num - 1]), dim=0),
+            batch["gt_relative_poses"][1 : self.current_frame_num, ...],
         )
         self.log("val/trans_error", trans_error)
         self.log("val/rot_error", rot_error)
+        self.log("val/euler_rot_error", rot_error_euler)
+        self.log("val/last_trans_error", last_trans_error)
+        self.log("val/last_rot_error", last_rot_error)
+        self.log("val/last_euler_rot_error", last_rot_error_euler)
+
+        rpe_trans_rmse, rpe_rot_rmse = evaluate_rpe( #TODO does rpe work for quat
+            torch.cat(list(self.poses[: self.current_frame_num - 1]), dim=0),
+            self.train_dataset.gt_relative_poses_matrices[
+                1 : self.current_frame_num
+            ].to(self.device),
+        )
+        self.log("val/rpe_trans_rmse", rpe_trans_rmse)
+        self.log("val/rpe_rot_rmse", rpe_rot_rmse)
 
     def test_step(self, batch, batch_idx):
         result = self(batch)
@@ -315,10 +399,6 @@ class StarOnline(pl.LightningModule):
             "rgb",
         )
         depth = visualize_depth(result["depth"]).reshape((test_H, test_W, 3))
-        target = to8b(
-            torch.reshape(batch["target"], (test_H, test_W, 3)).cpu().detach().numpy(),
-            "target",
-        )
 
         # Visualize static and dynamic nerfs separately
         rgb_static0 = to8b(
@@ -366,7 +446,6 @@ class StarOnline(pl.LightningModule):
             self.logger,
             batch_idx,
             rgb,
-            target,
             rgb_dynamic,
             rgb_static,
             depth,
@@ -399,6 +478,8 @@ class StarOnline(pl.LightningModule):
         self.test_rgb_statics = np.stack(self.test_rgb_statics, 0)
         self.test_rgb_dynamics = np.stack(self.test_rgb_dynamics, 0)
 
+        #TODO compute and log ms2e, lpips and ssim
+
         rgb_path = self.video_basepath + "rgb.mp4"
         depth_path = self.video_basepath + "depth.mp4"
         rgb_static_path = self.video_basepath + "rgb_static.mp4"
@@ -416,46 +497,54 @@ class StarOnline(pl.LightningModule):
 
     def setup(self, stage):
         self.train_dataset = StarOnlineDataset(
-            self.args, "train", self.args.initial_num_frames
+            self.args,
+            "train",
+            self.args.num_frames,
+            self.args.initial_num_frames,
         )
         self.val_dataset = StarOnlineDataset(
-            self.args, "val", self.args.initial_num_frames
+            self.args, 
+            "val", 
+            self.args.num_frames, 
+            self.args.initial_num_frames
         )
         self.test_dataset = StarOnlineDataset(
             self.args,
             "test",
-            self.args.initial_num_frames,  # TODO init num frames needed?
+            self.args.num_frames,
+            self.args.initial_num_frames,
         )
 
         if self.args.load_gt_poses:
-            self.register_buffer(
+            pass
+            """TODO remove or uncomment: self.register_buffer(
                 "gt_poses", self.train_dataset.get_gt_vehicle_poses(self.args)
-            )
-        elif self.args.noisy_pose_init:
+            )"""
+        elif self.args.noisy_pose_init and (self.args.online_ckpt_path is None):
             with torch.no_grad():
-                self.poses += self.train_dataset.get_noisy_gt_relative_poses()[1:].to(
-                    self.device
+                for i, noisy_gt_relative_pose in enumerate(self.train_dataset.get_noisy_gt_relative_poses()[1:].to(self.device)):
+                    print("noisy_gt_relative_pose shape", noisy_gt_relative_pose.shape)
+                    print("poses[i] shape", self.poses[i].shape)
+                    self.poses[i].copy_(noisy_gt_relative_pose)
+
+                print("poses shape", torch.cat(list(self.poses), dim=0).shape)
+                print("gt_relative_poses shape", self.train_dataset.gt_relative_poses[1:].shape)
+
+                trans_error, rot_error, _, _, _, _ = get_pose_metrics(
+                    torch.cat(list(self.poses), dim=0),
+                    self.train_dataset.gt_relative_poses[1:],
+                    reduce=False
                 )
+                print("trans errors:\n", trans_error)
+                print("rot errors:\n", rot_error)
+        
+        # Init SSIM metric
+        self.val_ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+        # Init LPIPS metric
+        self.val_lpips = LearnedPerceptualImagePatchSimilarity('vgg', normalize=True)
+        for p in self.val_lpips.net.parameters():
+            p.requires_grad = False
 
-        # TODO remove!
-        """with torch.no_grad():
-            gt_vehicle_poses = self.train_dataset.get_gt_vehicle_poses(self.args)
-            gt_pose = torch.eye(4, dtype=torch.float32)
-            gt_pose[:3, :3] = gt_vehicle_poses[0, :3, :3]
-            gt_pose[3, :3] = gt_vehicle_poses[0, :3, 3]
-            gt_pose = se3_log_map(gt_pose[None, ...])
-        print("gt pose", gt_pose)
-        self.register_buffer("gt_pose", gt_pose)"""
-
-        # TODO remove
-        """with torch.no_grad():
-            gt_poses = torch.eye(4, dtype=torch.float32)
-            gt_poses = gt_poses.repeat(16, 1, 1)
-            gt_poses[:, :3, :3] = gt_vehicle_poses[:, :3, :3]
-            gt_poses[:, 3, :3] = gt_vehicle_poses[:, :3, 3]
-            gt_poses = se3_log_map(gt_poses)
-        print("gt poses", gt_poses)
-        self.register_buffer("gt_poses", gt_poses)"""
 
     def train_dataloader(self):
         return DataLoader(
@@ -482,9 +571,34 @@ class StarOnline(pl.LightningModule):
             pin_memory=True,
         )
 
+    def on_save_checkpoint(self, checkpoint):
+        for k in list(checkpoint.keys()):
+            if k.startswith("val_lpips") or k.startswith("val_ssim"):
+                checkpoint.pop(k)
+        
+    def eval_lpips(self, pred_img, gt_img):
+        # Rearrange for torchmetrics library
+        pred_img_rearranged = rearrange(pred_img[None, ...], "B H W C -> B C H W")
+        gt_img_rearranged = rearrange(gt_img[None, ...], "B H W C -> B C H W")
+
+        self.val_lpips(torch.clip(pred_img_rearranged, 0, 1), torch.clip(gt_img_rearranged, 0, 1))
+        lpips = self.val_lpips.compute()
+        self.val_lpips.reset()
+        return lpips
+    
+    def eval_ssim(self, pred_img, gt_img):
+        # Rearrange for torchmetrics library
+        pred_img_rearranged = rearrange(pred_img[None, ...], "B H W C -> B C H W")
+        gt_img_rearranged = rearrange(gt_img[None, ...], "B H W C -> B C H W")
+
+        self.val_ssim(pred_img_rearranged, gt_img_rearranged)
+        ssim = self.val_ssim.compute()
+        self.val_ssim.reset()
+        return ssim
+
 
 def create_model(args):
-    network = STaR(args.num_frames, args)
+    network = STaR(args)
 
     if args.appearance_ckpt_path:
         load_star_network_from_ckpt(args.appearance_ckpt_path, network)
@@ -500,8 +614,12 @@ def create_model(args):
 
 def train(args, model):
     logger = WandbLogger(project=args.expname)
-    logger.watch(model, log="all")
+    #logger.watch(model, log="all")
     logger.experiment.config.update(args)
+    logger.experiment.log_code(root=args.code_dir)
+
+    configure_logger(f"logs/online/{logger.version}", "training.log")
+    logging.info(f"Slurm job id is {args.job_id}")
 
     epoch_val = (
         args.epoch_val
@@ -533,12 +651,14 @@ def train(args, model):
         devices=1,
         num_sanity_val_steps=0,
         accumulate_grad_batches=args.accumulate_grad_batches,
+        reload_dataloaders_every_n_epochs=1,
         # detect_anomaly=True,
         # profiler="simple",
     )
 
-    trainer.fit(model, ckpt_path=args.online_ckpt_path)
 
+    trainer.fit(model, ckpt_path=args.online_ckpt_path) 
+    #trainer.test(model, ckpt_path=args.online_ckpt_path)
 
 if __name__ == "__main__":
     print("torch version", torch.__version__)
@@ -549,11 +669,17 @@ if __name__ == "__main__":
         torch.cuda.get_device_properties(0).total_memory / 1073741824,
     )
 
+    np.seterr(all="raise", under="warn")
+    torch.autograd.set_detect_anomaly(True)
+    torch.set_warn_always(True)
+    torch.set_printoptions(precision=20, threshold=inf)
+
     set_matmul_precision()
     seed_everything(42, workers=True)
 
     parser = config_parser()
     args = parser.parse_args()
+
     model = create_model(args)
 
     train(args, model)

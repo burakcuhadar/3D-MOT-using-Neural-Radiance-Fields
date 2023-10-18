@@ -1,7 +1,6 @@
 import torch
 from pytorch_lightning.callbacks import Callback
-from datasets.carla_star_online import StarOnlineDataset
-from torch.utils.data import DataLoader
+from utils.metrics import get_pose_metrics_multi
 
 """
 Callback to handle early stopping when num of frames is reached,
@@ -84,28 +83,41 @@ class StarOnlineCallback(Callback):
         
         if pl_module.current_frame_num == self.args.initial_num_frames:
             if avg_loss <= self.online_thres:
-                """pl_module.start_frame = torch.tensor(
-                    [self.args.initial_num_frames],
-                    dtype=torch.long,
-                    device=pl_module.device,
-                )  # TODO also try with self.args.initial_num_frames-1?"""
-                pl_module.start_frame = torch.tensor([3], dtype=pl_module.start_frame.dtype, device=pl_module.start_frame.device)
+                # pl_module.start_frame = torch.tensor([2], dtype=pl_module.start_frame.dtype, device=pl_module.start_frame.device)
+                #pl_module.start_frame += 1
                 pl_module.current_frame_num += 1
+                torch.cuda.synchronize(device=pl_module.device)
 
-                pl_module.log("train/current_frame_num", pl_module.current_frame_num)
-                pl_module.log("train/start_frame", pl_module.start_frame)
+                # freeze starting pose
+                #pl_module.poses[0].requires_grad = False
+
+                pl_module.logger.log_metrics({"train/current_frame_num": pl_module.current_frame_num})
+                pl_module.logger.log_metrics({"train/start_frame": pl_module.start_frame})
+
+                # Set new threshold
+                #self.online_thres = 8e-4
+
+                #TODO freeze nerf?
+                """
+                for p in pl_module.star_network.parameters():
+                    p.requires_grad = False
+                """    
+
         else:
             self.count = self.count + 1
             if self.count > 40 and avg_loss <= self.online_thres:
                 self.count = 0
-                pl_module.start_frame += 1
+                #pl_module.start_frame += 1
                 pl_module.current_frame_num += 1
+                torch.cuda.synchronize(device=pl_module.device)
 
-                pl_module.log("train/current_frame_num", pl_module.current_frame_num)
-                pl_module.log("train/start_frame", pl_module.start_frame)
+                # freeze starting pose
+                #pl_module.poses[pl_module.start_frame-1].requires_grad = False
+
+                pl_module.logger.log_metrics({"train/current_frame_num": pl_module.current_frame_num})
+                pl_module.logger.log_metrics({"train/start_frame": pl_module.start_frame})
 
         pl_module.training_fine_losses.clear()
-        torch.cuda.synchronize(device=pl_module.device)
 
         # Stop the training if maximum number of frames is reached
         if pl_module.current_frame_num.item() > self.max_num_frames:
@@ -182,9 +194,14 @@ class StarOnlineCallback(Callback):
     '''
 
     def on_load_checkpoint(self, trainer, pl_module, checkpoint):
-        # Log poses loaded from checkpoint
-        print("Loaded poses:")
-        print(checkpoint["state_dict"]["poses"])
+        trans_error, rot_error, _, _, rot_error_euler, _ = get_pose_metrics_multi(
+            torch.cat(list(pl_module.poses), dim=0),
+            pl_module.train_dataset.gt_relative_poses[:, 1:, ...].transpose(0, 1).to(pl_module.device),
+            reduce=False
+        )
+        print(f"trans errors:\n {trans_error}")
+        print(f"rot errors:\n {rot_error}")
+        print(f"rot errors euler:\n {rot_error_euler}")
 
         # Set num_frames of datasets
         pl_module.train_dataset.current_frame = checkpoint["state_dict"][

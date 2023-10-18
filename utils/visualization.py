@@ -4,14 +4,14 @@ import numpy as np
 import cv2
 from PIL import Image
 
-from models.rendering import to8b
+from models.rendering__ import to8b
 
 
-def visualize_depth(depth, H=400, W=400, cmap=cv2.COLORMAP_JET):
+def visualize_depth(depth, H=400, W=400, cmap=cv2.COLORMAP_JET, app_init=False):
     """
     depth: (H*W) or (num_vehicles, H*W)
     """
-    if depth.ndim == 1:
+    if depth.ndim == 1 or app_init:
         x = depth.cpu().numpy()
         x = np.nan_to_num(x)  # change nan to 0
         mi = np.min(x)  # get minimum depth

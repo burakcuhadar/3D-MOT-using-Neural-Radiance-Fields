@@ -1,48 +1,116 @@
-# Adapted from https://vision.in.tum.de/data/datasets/rgbd-dataset/tools#evaluation
+
 
 import random
 import numpy as np
+import pypose as pp
 import torch
-from lietorch import SO3
+from lietorch import SO3, SE3
+from .dataset import to_rotvec, to_euler, rotation_metric
 
+# Using Section 3.2 metric(see https://www.cs.cmu.edu/~cga/dynopt/readings/Rmetric.pdf)
+def euler_metric(poses1, poses2):
+    poses1 = to_euler(poses1)
+    poses2 = to_euler(poses2)
+    return np.sqrt(np.sum((poses1 - poses2) ** 2, axis=1))
 
-def get_pose_metrics(poses, gt_poses):
+@torch.no_grad()
+def get_pose_metrics(poses, gt_poses, reduce=True):
     assert poses.shape[0] == gt_poses.shape[0]
+    device = poses.device
+    #poses = poses.cpu().numpy()
+    #gt_poses = SE3.exp(gt_poses).matrix()
+    #poses = SE3.exp(poses).matrix()
+    gt_poses = pp.SE3(gt_poses).matrix()
+    poses = pp.SE3(poses).matrix()
+    
+    '''if poses.shape[1] == 7:
+        #poses = SE3.exp(poses).log()
+        poses = torch.from_numpy(to_rotvec(poses.cpu().numpy())).to(gt_poses.device)'''
 
-    gt_translation = gt_poses[:, :3]
-    gt_rotation = gt_poses[:, 3:]
-    translation = poses[:, :3]
-    rotation = poses[:, 3:]
+    #gt_translation = gt_poses[:, :3]
+    #gt_rotation = gt_poses[:, 3:]
+    
+    if len(poses.shape) == 2:
+        rotation = poses[:3, :3]
+        translation = poses[:3, 3]
+    elif len(poses.shape) == 3:
+        rotation = poses[:, :3, :3]
+        translation = poses[:, :3, 3]
+    else:
+        raise ValueError("poses must be either 2 or 3 dimensional")
+    
+    if len(gt_poses.shape) == 2:
+        gt_rotation = gt_poses[:3, :3]
+        gt_translation = gt_poses[:3, 3]
+    elif len(gt_poses.shape) == 3:
+        gt_rotation = gt_poses[:, :3, :3]
+        gt_translation = gt_poses[:, :3, 3]
+    else:
+        raise ValueError("poses must be either 2 or 3 dimensional")
+    
+    gt_rotation = gt_rotation.cpu().numpy()
+    gt_translation = gt_translation.cpu().numpy()
+    rotation = rotation.cpu().numpy()
+    translation = translation.cpu().numpy()
 
-    trans_error = torch.mean(
-        torch.sum((translation - gt_translation) ** 2, dim=1).sqrt()
-    )
-    rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
+    """
+    if poses.shape[1] == 7:
+        translation = SE3.exp(poses).translation()[:, :3].cpu().numpy().astype(np.float32)
+    elif poses.shape[1] == 6:
+        translation = poses[:, :3].cpu().numpy().astype(np.float32)
+    elif poses.shape[1] == 4:
+        translation = poses[:, :3, 3].cpu().numpy().astype(np.float32)
+    else:
+        raise ValueError("poses must be either 6 or 7 dimensional")
+    """
+        
+    if reduce:
+        trans_error = np.mean(
+            np.sqrt(np.sum((translation - gt_translation) ** 2, axis=1))
+        )
+        #rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
+        rot_error = np.mean(rotation_metric(rotation, gt_rotation), axis=0)
+        rot_error_euler = np.mean(euler_metric(rotation, gt_rotation), axis=0)
+    else:
+        trans_error = np.sqrt(np.sum((translation - gt_translation) ** 2, axis=1))
+        #rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1)
+        rot_error = rotation_metric(rotation, gt_rotation)
+        rot_error_euler = euler_metric(rotation, gt_rotation)
 
-    last_trans_error = torch.sum((translation[-1] - gt_translation[-1]) ** 2).sqrt()
-    last_rot_error = torch.sum(torch.abs(rotation[-1] - gt_rotation[-1]))
+    last_trans_error = np.sqrt(np.sum((translation[-1] - gt_translation[-1]) ** 2))
+    #last_rot_error = torch.sum(torch.abs(rotation[-1] - gt_rotation[-1]))
+    last_rot_error = rotation_metric(rotation[-1][None, ...], gt_rotation[-1][None, ...])[0]
+    last_rot_error_euler = euler_metric(rotation[-1][None, ...], gt_rotation[-1][None, ...])[0]
 
-    return trans_error, rot_error, last_trans_error, last_rot_error
+    if not reduce:
+        trans_error = torch.from_numpy(trans_error).to(device)
+        rot_error = torch.from_numpy(rot_error).to(device)
+    
+    return trans_error, rot_error, last_trans_error, last_rot_error, rot_error_euler, last_rot_error_euler
 
-def get_pose_metrics_multi(poses, gt_poses):
+#TODO rewrite according to get_pose_metrics
+def get_pose_metrics_multi(poses, gt_poses, reduce=True):
     assert poses.shape[0] == gt_poses.shape[0]
     assert poses.shape[1] == gt_poses.shape[1]
 
-    gt_translation = gt_poses[:, :, :3]
-    gt_rotation = gt_poses[:, :, 3:]
-    translation = poses[:, :, :3]
-    rotation = poses[:, :, 3:]
+    num_vehicles = poses.shape[1]
 
-    trans_error = torch.mean(
-        torch.sum((translation - gt_translation) ** 2, dim=2).sqrt(),
-        dim=-1    
-    ) # num_vehicles
-    rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=2).mean(dim=-1)
+    trans_errors, rot_errors, last_trans_errors, last_rot_errors, rot_error_eulers, last_rot_error_eulers = [], [], [], [], [], []
+    for i in range(num_vehicles):
+        trans_error, rot_error, last_trans_error, last_rot_error, rot_error_euler, last_rot_error_euler = get_pose_metrics(
+            poses[:,i], gt_poses[:,i], reduce=reduce
+        )
 
-    last_trans_error = torch.sum((translation[:, -1] - gt_translation[:, -1]) ** 2, dim=-1).sqrt()
-    last_rot_error = torch.sum(torch.abs(rotation[:, -1] - gt_rotation[:, -1]), dim=-1)
+        trans_errors.append(trans_error)
+        rot_errors.append(rot_error)
+        last_trans_errors.append(last_trans_error)
+        last_rot_errors.append(last_rot_error)
+        rot_error_eulers.append(rot_error_euler)
+        last_rot_error_eulers.append(last_rot_error_euler)
 
-    return trans_error, rot_error, last_trans_error, last_rot_error
+    return trans_errors, rot_errors, last_trans_errors, last_rot_errors, rot_error_eulers, last_rot_error_eulers
+
+# Code below is adapted from https://vision.in.tum.de/data/datasets/rgbd-dataset/tools#evaluation
 
 def find_closest_index(L, t):
     """

@@ -4,26 +4,27 @@ import numpy as np
 import torch
 import torch._dynamo
 import pytorch_lightning as pl
+import torch.nn.functional as F
+
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
-from utils.logging import log_val_table_app_init
+from utils.logging import log_val_table_app_init_nerfacc
 from torch.utils.data import DataLoader
-from models.star import STaR
+from models.star_nerfacc import STaR
+from nerfacc.estimators.occ_grid import OccGridEstimator
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import TQDMProgressBar, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning import Trainer, seed_everything
 
-from models.rendering import sample_pts, render_star_appinit
+from models.rendering import render_image_with_occgrid, Rays
 from models.rendering import mse2psnr, img2mse, to8b
 from models.loss import compute_sigma_loss
-from datasets.carla_star_app_init import StarAppInitDataset
+from datasets.carla_star_app_init_nerfacc import StarAppInitDatasetNerfacc
+
 from utils.visualization import visualize_depth
 from utils.io import *
-from callbacks.check_batch_grad import CheckBatchGradient
 
-
-torch.autograd.set_detect_anomaly(True)
 
 
 def get_scheduler(args, optimizer):
@@ -44,74 +45,76 @@ class StarAppInit(pl.LightningModule):
         self.args = args
         self.star_network = star_network
 
+
+        self.register_buffer(
+            "aabb", 
+            torch.tensor([-1., -1., -1., 1., 1., 1.])
+        )
+        """self.register_buffer(
+            "aabb", 
+            torch.tensor([-1.5, -1.5, -1.5, 1.5, 1.5, 1.5])
+        )"""
+        """self.register_buffer(
+            "aabb", 
+            torch.tensor([-2., -2., -2., 2., 2., 2.])
+        )"""
+        self.args.render_step_size = ((self.aabb[3:] - self.aabb[:3]) ** 2).sum().sqrt().item() / 1000
+        self.estimator = OccGridEstimator(
+            roi_aabb=self.aabb, resolution=args.grid_resolution, levels=args.grid_nlvl
+        )
+
     def forward(self, batch):
-        pts, z_vals = sample_pts(
-            batch["rays_o"],
-            batch["rays_d"],
-            self.train_dataset.near,
-            self.train_dataset.far,
-            self.args.N_samples,
-            self.args.perturb,
-            self.args.lindisp,
-            self.training,
-        )
+        def occ_eval_fn(x):
+            density = self.star_network.static_nerf.query_density(x)
+            return density * self.args.render_step_size 
 
-        viewdirs = batch["rays_d"] / torch.norm(
-            batch["rays_d"], dim=-1, keepdim=True
-        )  # [N_rays, 3]
-
-        return render_star_appinit(
-            self.star_network,
-            pts,
-            viewdirs,
-            z_vals,
-            batch["rays_o"],
-            batch["rays_d"],
-            self.args.N_importance,
-        )
-
-    def training_step(self, batch, batch_idx):
-        result = self(batch)
-
-        img_loss = img2mse(result["rgb"], batch["target"])
-        loss = img_loss
-        img_loss0 = img2mse(result["rgb0"], batch["target"])
-        loss = loss + img_loss0
-
-        if self.args.depth_loss:
-            depth_loss = compute_depth_loss(
-                result["depth"],
-                batch["target_depth"],
-                self.train_dataset.near,
-                self.train_dataset.far,
+        if self.training:
+            # update occupancy grid
+            self.estimator.update_every_n_steps(
+                step=self.global_step,
+                occ_eval_fn=occ_eval_fn,
+                occ_thre=1e-2, #TODO finetune?
             )
-            loss = loss + self.args.depth_lambda * depth_loss
-        if self.args.sigma_loss:
-            sigma_loss = compute_sigma_loss(
-                result["weights"],
-                result["z_vals"],
-                result["dists"],
-                batch["target_depth"],
-                self.train_dataset.near,
-                self.train_dataset.far,
+
+        rgb, acc, depth, n_rendering_samples = render_image_with_occgrid(
+            self.star_network.static_nerf,
+            self.estimator,
+            Rays(batch["rays_o"], batch["rays_d"]),
+            # rendering options
+            near_plane=0.0,
+            far_plane=1e10,
+            render_step_size=self.args.render_step_size,
+            render_bkgd=None,
+            test_chunk_size=self.args.chunk
+        )
+        
+        return rgb, acc, depth, n_rendering_samples
+
+    def training_step(self, batch, batch_idx):        
+        rgb, acc, depth, n_rendering_samples = self(batch)
+        
+        if n_rendering_samples == 0:
+            return None
+
+        if self.args.target_sample_batch_size > 0:
+            # dynamic batch size for rays to keep sample batch size constant.
+            num_rays = batch["rays_o"].shape[0]
+            num_rays = int(
+                num_rays * (self.args.target_sample_batch_size / float(n_rendering_samples))
             )
-            loss = loss + self.args.sigma_lambda * sigma_loss
+            self.train_dataset.update_num_rays(num_rays)
 
-        psnr = mse2psnr(img_loss)
-        psnr0 = mse2psnr(img_loss0)
+        loss = F.smooth_l1_loss(rgb, batch["target"]) #TODO also try the usual loss
 
-        self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True)
+        mse_loss = img2mse(rgb, batch["target"])
+        psnr = mse2psnr(mse_loss)
+
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/psnr", psnr, on_step=False, on_epoch=True)
-        self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
-
-        if self.args.depth_loss:
-            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
-        if self.args.sigma_loss:
-            self.log("train/sigma_loss", sigma_loss, on_step=False, on_epoch=True)
+        self.log("train/mse_loss", mse_loss, on_step=False, on_epoch=True)
 
         return loss
-
+        
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             params=self.star_network.parameters(),
@@ -123,12 +126,11 @@ class StarAppInit(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def validation_step(self, batch, batch_idx):
-        result = self(batch)
+        rgb, acc, depth, _ = self(batch)
 
-        val_mse = img2mse(result["rgb"], batch["target"])
+        val_mse = img2mse(rgb, batch["target"])
         psnr = mse2psnr(val_mse)
 
-        # TODO does this gather for multi gpu setup correctly?
         self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/psnr", psnr, on_step=False, on_epoch=True)
 
@@ -136,41 +138,27 @@ class StarAppInit(pl.LightningModule):
         val_H = self.val_dataset.H
         val_W = self.val_dataset.W
 
-        rgb0 = to8b(
-            torch.reshape(result["rgb0"], (val_H, val_W, 3)).cpu().detach().numpy(),
-            "rgb0",
-        )
-        depth0 = visualize_depth(result["depth0"]).reshape((val_H, val_W, 3))
-        z_std = to8b(
-            torch.reshape(result["z_std"], (val_H, val_W, 1)).cpu().detach().numpy(),
-            "z_std",
-        )
         rgb = to8b(
-            torch.reshape(result["rgb"], (val_H, val_W, 3)).cpu().detach().numpy(),
+            torch.reshape(rgb, (val_H, val_W, 3)).cpu().detach().numpy(),
             "rgb",
         )
-        depth = visualize_depth(result["depth"]).reshape((val_H, val_W, 3))
+        depth = visualize_depth(depth, app_init=True).reshape((val_H, val_W, 3))
         target = to8b(
             torch.reshape(batch["target"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "target",
         )
-        target_depth = visualize_depth(batch["target_depth"]).reshape((val_H, val_W, 3))
 
-        log_val_table_app_init(
+        log_val_table_app_init_nerfacc(
             self.logger,
             self.current_epoch,
             rgb,
             target,
             depth,
-            target_depth,
-            rgb0,
-            depth0,
-            z_std,
         )
 
     def setup(self, stage):
-        self.train_dataset = StarAppInitDataset(self.args, split="train")
-        self.val_dataset = StarAppInitDataset(self.args, split="val")
+        self.train_dataset = StarAppInitDatasetNerfacc(self.args, split="train")
+        self.val_dataset = StarAppInitDatasetNerfacc(self.args, split="val")
 
     def train_dataloader(self):
         return DataLoader(
@@ -202,6 +190,9 @@ def train():
     logger.watch(model, log="all")
     logger.experiment.config.update(args)
 
+    configure_logger(f"logs/appinit/{logger.version}", "training.log")
+    logging.info(f"Slurm job id is {args.job_id}")
+
     ckpt_cb = ModelCheckpoint(
         dirpath=f"ckpts/appinit/{logger.version}",
         filename="{epoch:d}",
@@ -211,7 +202,7 @@ def train():
     )
 
     early_stopping_cb = EarlyStopping(
-        monitor="train/fine_loss",
+        monitor="train/mse_loss",
         mode="min",
         stopping_threshold=args.appearance_init_thres,
     )
@@ -219,7 +210,6 @@ def train():
     callbacks = [
         ckpt_cb,
         TQDMProgressBar(refresh_rate=1),
-        CheckBatchGradient(),
         early_stopping_cb,
     ]
 
@@ -233,7 +223,7 @@ def train():
         devices=1,
         num_sanity_val_steps=0,
         precision=16 if args.mixed_precision else 32,
-        detect_anomaly=True,  # NOTE: disable for faster training?
+        detect_anomaly=False,  # NOTE: disable for faster training?
     )
 
     trainer.fit(model, ckpt_path=args.appearance_ckpt_path)
@@ -245,3 +235,4 @@ if __name__ == "__main__":
     set_matmul_precision()
     seed_everything(42, workers=True)
     train()
+    print("done.")

@@ -1,6 +1,11 @@
 import numpy as np
 import os
 import re
+
+import torch
+import pypose as pp
+from lietorch import SE3
+from pytorch3d.transforms import se3_log_map as se3_log_map_p3d
 from scipy.spatial.transform import Rotation
 
 
@@ -51,12 +56,84 @@ def invert_transformation(t):
     t_inv[:3, -1] = -t[:3, :3].T @ t[:3, -1]
     return t_inv
 
-
+@torch.no_grad()
 def se3_log_map(matrices):
+    """ old, remove
+    matrices_p3d = np.eye(4, dtype=np.float32)[None, ...].repeat(matrices.shape[0], axis=0)
+    matrices_p3d[:, :3, :3] = matrices[:, :3, :3]   
+    matrices_p3d[:, 3, :3] = matrices[:, :3, 3]
+    se3_log = se3_log_map_p3d(torch.from_numpy(matrices_p3d)).numpy()
+    """
+
+    """ old, remove
     rot = Rotation.from_matrix(matrices[:, :3, :3]).as_rotvec()
     trans = matrices[:, :3, 3]
     return np.concatenate((trans, rot), axis=-1).astype(np.float32)
+    """
+    
+    """
+    quat = Rotation.from_matrix(matrices[:, :3, :3]).as_quat()
+    trans = matrices[:, :3, 3]
+    pose_data = np.concatenate((trans, quat), axis=-1)
+    T = SE3.InitFromVec(torch.tensor(pose_data))
+    se3_log = T.log().numpy()
+    """
 
+    se3_log = pp.mat2SE3(matrices).tensor().numpy()
+
+    return se3_log
+
+def to_quaternion(pose):
+    if pose.shape[-1] == 3:
+        return Rotation.from_rotvec(pose).as_quat()
+    elif pose.shape[-1] == 6:
+        rot = Rotation.from_rotvec(pose[:, 3:]).as_quat()
+        trans = pose[:, :3]
+        return np.concatenate([trans, rot], axis=-1)
+    else:
+        raise ValueError("pose must be either 3 or 6 dimensional")
+
+def to_rotvec(pose):
+    if pose.shape[-1] == 4:
+        return Rotation.from_quat(pose).as_rotvec()
+    elif pose.shape[-1] == 7:
+        rot = Rotation.from_quat(pose[:, 3:]).as_rotvec()
+        trans = pose[:, :3]
+        return np.concatenate([trans, rot], axis=-1)
+    else:
+        raise ValueError("pose must be either 4 or 7 dimensional")
+    
+def to_euler(rot):
+    if len(rot.shape) >=2 and rot.shape[-1] == 3 and rot.shape[-2] == 3:
+        return Rotation.from_matrix(rot).as_euler("xyz")
+    # from axis-angle to euler
+    if rot.shape[-1] == 3:
+        return Rotation.from_rotvec(rot).as_euler("xyz")
+    # from quaternion to euler
+    elif rot.shape[-1] == 4:
+        return Rotation.from_quat(rot).as_euler("xyz")
+    else:
+        raise ValueError("rot must be either 3 or 4 dimensional")
+
+def to_matrix(rot):
+    if len(rot.shape) >=2 and rot.shape[-1] == 3 and rot.shape[-2] == 3:
+        return rot
+    if rot.shape[-1] == 3:
+        return Rotation.from_rotvec(rot).as_matrix()
+    elif rot.shape[-1] == 4:
+        return Rotation.from_quat(rot).as_matrix()
+    else:
+        raise ValueError("rot must be either 3 or 4 dimensional")
+
+# Using Deviation from the Identity Matrix(see https://www.cs.cmu.edu/~cga/dynopt/readings/Rmetric.pdf)
+def rotation_metric(rot1, rot2):
+    rot1 = to_matrix(rot1) # N, 3, 3
+    rot2 = to_matrix(rot2) # N, 3, 3
+
+    return np.linalg.norm(np.eye(3) - rot1 @ rot2.transpose(0, 2, 1), axis=(1, 2))
+
+    
+    
 
 def pose_translational(t):
     return np.array(

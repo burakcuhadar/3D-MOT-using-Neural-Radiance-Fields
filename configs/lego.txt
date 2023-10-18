@@ -1,16 +1,12 @@
-expname = lightning_appinit
+expname = lightning_lego
 basedir = ./logs
+datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/nerf_synthetic/lego
+has_depth_data = False
 code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_with_test_poses
-num_frames = 16
-
-num_vehicles = 1
-has_depth_data = True
 
 far_dist = 1e10
 
 num_workers = 4
-
 
 netdepth = 8
 netdepth_fine = 8
@@ -18,14 +14,13 @@ netwidth = 256
 netwidth_fine = 256
 N_samples = 256
 N_importance = 256
-end_barf = -1
 
 chunk = 5000
 netchunk = 16384
 
-scale_factor = 0.01
-near = 3.0
-far = 80.0
+near = 2.0
+far = 6.0
+white_bkgd = True
 
 lrate = 5e-4
 lrate_decay = 40
@@ -39,7 +34,6 @@ mixed_precision = False
 
 epochs_appearance = 800
 epoch_ckpt = 1
-#TODO eliminate epoch_print?
 epoch_print = 1
 epoch_val = 1
 
@@ -51,12 +45,4 @@ epoch_val = 1
 #epoch_val = 25
 
 appearance_init_thres = 9e-4
-
-
-
-#TODO are these needed for app init?
-no_test_set = True
-save_video_frames = True
-
-
 use_viewdirs = True

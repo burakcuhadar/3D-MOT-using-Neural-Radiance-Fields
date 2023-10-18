@@ -2,10 +2,15 @@ import torch
 import os
 from glob import glob
 import numpy as np
+import pypose as pp
 import imageio
 import logging
 import time
 import random
+from scipy.spatial.transform import Rotation
+
+
+from lietorch import SE3
 
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
@@ -19,6 +24,8 @@ from utils.dataset import (
     pose_spherical,
     se3_log_map,
     pose_rotational,
+    to_quaternion,
+    to_euler
 )
 
 
@@ -37,7 +44,9 @@ class StarOnlineDataset(Dataset):
         self.N_rand = args.N_rand
         self.car_sample_ratio = args.car_sample_ratio
 
-        self.gt_relative_poses = torch.from_numpy(self.load_gt_relative_poses(args))
+        self.gt_relative_poses = torch.from_numpy(self.load_gt_relative_poses(args)).float()
+        #with torch.no_grad():
+        #    self.gt_relative_poses_quat = SE3.exp(self.gt_relative_poses).vec()
         self.gt_vehicle_poses = self.get_gt_vehicle_poses(args)
 
         if split == "test":
@@ -132,15 +141,16 @@ class StarOnlineDataset(Dataset):
                     self.target_depths, [num_frames, -1]
                 )  # [num_frames, N*H*W]
 
-            semantic_rays = np.swapaxes(
-                self.semantic_imgs, 0, 1
-            )  # [frame_num, N, H, W]
-            semantic_rays = np.reshape(
-                semantic_rays, [num_frames, -1]
-            )  # [frame_num, N*H*W]
-            self.semantic_rays = semantic_rays
+            if self.semantic_imgs is not None:
+                semantic_rays = np.swapaxes(
+                    self.semantic_imgs, 0, 1
+                )  # [frame_num, N, H, W]
+                semantic_rays = np.reshape(
+                    semantic_rays, [num_frames, -1]
+                )  # [frame_num, N*H*W]
+                self.semantic_rays = semantic_rays
 
-            print("semantic rays shape", semantic_rays.shape)
+                print("semantic rays shape", semantic_rays.shape)
 
             """
             car_mask = semantic_rays == 10
@@ -190,8 +200,12 @@ class StarOnlineDataset(Dataset):
                 if i < 50:
                     continue
                 # Currently, I skip the problematic val view
-                if i == len(cameras) - 1:
+                # if i == len(cameras) - 1:
+                #   continue
+            elif self.split == "test":
+                if i <= 55:
                     continue
+            
 
             logging.info(f"{cam} goes to {self.split}")
 
@@ -230,9 +244,12 @@ class StarOnlineDataset(Dataset):
         poses = np.array(poses).astype(np.float32)  # [view_num, 4, 4]
         self.view_num = len(poses)
 
-        semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[
-            ..., 0
-        ]  # [view_num, frame_num, H, W]
+        if len(semantic_imgs[0]) > 0:
+            semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[
+                ..., 0
+            ]  # [view_num, frame_num, H, W]
+        else:
+            semantic_imgs = None
 
         if args.has_depth_data:
             depth_imgs = np.array(depth_imgs)  # [view num, frame_num, H, W]
@@ -244,7 +261,6 @@ class StarOnlineDataset(Dataset):
 
     def __len__(self):
         if self.split == "train":
-            # return len(self.rays_o)
             return 1000
         elif self.split == "val":
             return 1
@@ -259,8 +275,8 @@ class StarOnlineDataset(Dataset):
         if self.split == "train":
             if self.car_sample_ratio == 0:
                 """No semantic rays"""
-                # frame = np.random.randint(low=self.start_frame, high=self.current_frame)
-                frame = random.choice(
+                frame = np.random.randint(low=self.start_frame, high=self.current_frame)
+                """frame = random.choice(
                     [0]
                     + list(
                         range(
@@ -268,7 +284,7 @@ class StarOnlineDataset(Dataset):
                             self.current_frame,
                         )
                     )
-                )
+                )"""
                 frames = np.array([frame])[:, None]  # 1,1
 
                 indices = np.random.choice(self.rays_o.shape[1], self.N_rand)
@@ -280,8 +296,8 @@ class StarOnlineDataset(Dataset):
                     target_depth = self.target_depths[frame, indices, ...]
             else:
                 """Semantic rays"""
-                #frame = np.random.randint(low=self.start_frame, high=self.current_frame)
-                frame = random.choice(
+                frame = np.random.randint(low=self.start_frame, high=self.current_frame)
+                """frame = random.choice(
                     [0]
                     + list(
                         range(
@@ -289,7 +305,7 @@ class StarOnlineDataset(Dataset):
                             self.current_frame,
                         )
                     )
-                )
+                )"""
                 frames = np.array([frame])[:, None]  # 1,1
 
                 car_sample_num = int(self.N_rand * self.car_sample_ratio)
@@ -385,6 +401,7 @@ class StarOnlineDataset(Dataset):
         assert split in splits, "Dataset split should be one of " + ", ".join(splits)
 
     # Used for debugging
+    @torch.no_grad()
     def get_gt_vehicle_poses(self, args):
         pose_files = sorted(glob(args.datadir + "/poses/*.npy"), key=natural_keys)
         poses = []
@@ -422,42 +439,47 @@ class StarOnlineDataset(Dataset):
                 # posei_0 = pose_inv @ pose0.numpy()
                 posei_0 = pose0 @ pose_inv  
                 poses_matrices.append(posei_0)
-                # for pytorch3d 4x4 format
-                """posei_0_ = np.eye(4, dtype=np.float32)
-                posei_0_[:3, :3] = posei_0[:3, :3]
-                posei_0_[3, :3] = posei_0[:3, 3]
-                poses.append(posei_0_)"""
 
         poses_matrices = np.stack(poses_matrices, axis=0)
         with torch.no_grad():
             self.gt_relative_poses_matrices = torch.from_numpy(poses_matrices)
 
-        poses = se3_log_map(poses_matrices)  # num_frames, 6
+        poses_log = se3_log_map(poses_matrices)  # num_frames, 6
 
-        return poses
+        return poses_log
 
+    @torch.no_grad()
     def get_noisy_gt_relative_poses(self):
-        print("gt relative poses", self.gt_relative_poses)
-        """noise = (
-            torch.randn((self.gt_relative_poses.shape[0] - 1, 6), dtype=torch.float32)
-            / 100.0
-        )
-        noisy_poses = torch.zeros_like(self.gt_relative_poses)
-        noisy_poses += self.gt_relative_poses
-        noisy_poses[1:, :] += noise"""
+        print("gt relative poses\n", self.gt_relative_poses)
+        
+        """
+        gt_matrix = SE3.exp(self.gt_relative_poses).matrix().numpy()
+        gt_rot = gt_matrix[:, :3, :3]
+        gt_rot_euler = Rotation.from_matrix(gt_rot).as_euler("xyz")
+        print("gt_rot_euler\n", gt_rot_euler)
+        gt_trans = gt_matrix[:, :3, 3]
+        """
 
-        rot_noise = (
-            torch.randn((self.gt_relative_poses.shape[0] - 1, 3), dtype=torch.float32)
-            / 10.0
-        )
-        trans_noise = (
-            torch.randn((self.gt_relative_poses.shape[0] - 1, 3), dtype=torch.float32)
-            / 100.0
-        )
-        noisy_poses = torch.zeros_like(self.gt_relative_poses)
-        noisy_poses += self.gt_relative_poses
-        noisy_poses[1:, :3] += trans_noise
-        noisy_poses[1:, 3:] += rot_noise
+        gt_rot_euler = pp.SE3(self.gt_relative_poses).rotation().euler().numpy()
+        print("gt_rot_euler\n", gt_rot_euler)
+        gt_trans = pp.SE3(self.gt_relative_poses).translation().numpy()
+        
+        rot_noise = np.random.randn(self.gt_relative_poses.shape[0] - 1) * np.pi / 16 - np.pi / 32
+        trans_noise = np.random.randn(self.gt_relative_poses.shape[0] - 1, 3) / 100.0
+        
+        noisy_rot = np.zeros((self.gt_relative_poses.shape[0], 3))
+        noisy_rot += gt_rot_euler
+        noisy_rot[1:, 1] += rot_noise # we only add noise to y-axis rotation
+        
+        noisy_trans = np.zeros((self.gt_relative_poses.shape[0], 3))
+        noisy_trans += gt_trans
+        noisy_trans[1:, ...] += trans_noise
+        
+        noisy_pose_matrix = np.eye(4, dtype=np.float32)[None, ...].repeat(self.gt_relative_poses.shape[0], axis=0)
+        noisy_pose_matrix[:, :3, :3] = Rotation.from_euler("xyz", noisy_rot).as_matrix()
+        noisy_pose_matrix[:, :3, 3] = noisy_trans
 
-        print("noisy poses", noisy_poses)
-        return noisy_poses
+        noisy_poses_log = se3_log_map(noisy_pose_matrix)
+        noisy_poses_log = torch.from_numpy(noisy_poses_log)
+        
+        return noisy_poses_log

@@ -1,6 +1,9 @@
 expname = lightning_appinit
 basedir = ./logs
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
+code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
+
 has_depth_data = True
 num_frames = 15
 num_vehicles = 2
@@ -60,5 +63,5 @@ appearance_init_thres = 9e-4
 no_test_set = True
 save_video_frames = True
 
-#TODO eliminate use_viewdirs
+
 use_viewdirs = True

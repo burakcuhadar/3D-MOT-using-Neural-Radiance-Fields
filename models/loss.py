@@ -57,7 +57,7 @@ def compute_sigma_loss(
         -torch.log(weights_[mask])
         * torch.exp(
             -((z_vals[mask] - depths[mask, None]) ** 2) / (2 * err)
-        )  # TODO take a look at z_vals - depths
+        )
         * dists[mask]
     )
 

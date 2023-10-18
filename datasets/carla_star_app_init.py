@@ -68,7 +68,8 @@ class StarAppInitDataset(Dataset):
             self.rays_d = rays_d
             self.target_rgbs = target_rgbs
 
-            self.semantic_rays = np.reshape(semantic_imgs, [-1])  # [N*H*W]
+            if semantic_imgs is not None:
+                self.semantic_rays = np.reshape(semantic_imgs, [-1])  # [N*H*W]
 
             print("rays_o", self.rays_o.shape)
             print("rays_d", self.rays_d.shape)
@@ -81,7 +82,11 @@ class StarAppInitDataset(Dataset):
 
     def load_imgs_poses(self, args):
         # How many images we have for one frame: rgb, semantic, (depth)
-        img_num_for_one_frame = 3 if args.has_depth_data else 2
+        img_num_for_one_frame = 2 
+        if args.has_depth_data:
+            img_num_for_one_frame = 3
+        if self.split == "val":
+            img_num_for_one_frame = 1
 
         extrinsics = np.load(
             os.path.join(args.datadir, "extrinsics.npy"), allow_pickle=True
@@ -101,10 +106,13 @@ class StarAppInitDataset(Dataset):
                 if i >= 50:
                     continue
             elif self.split == "val":
-                if i < 50:
+                if i < 50 or i > 55:
                     continue
                 # Currently, I skip the problematic val view
-                if i == len(cameras) - 1:
+                #if i == len(cameras) - 1:
+                #    continue
+            elif self.split == "test":
+                if i <= 55:
                     continue
             print(cam, "goes to", self.split)
 
@@ -137,13 +145,17 @@ class StarAppInitDataset(Dataset):
         imgs = (np.array(imgs) / 255.0).astype(np.float32)[
             ..., :3
         ]  # [view_num, 1, H, W, 3]
+        print("imgs shape", imgs.shape)
         imgs = np.squeeze(imgs, axis=1)
         poses = np.array(poses).astype(np.float32)  # [view_num, 4, 4]
 
-        semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[
-            ..., 0
-        ]  # [view_num, 1, H, W]
-        semantic_imgs = np.squeeze(semantic_imgs, axis=1)
+        if len(semantic_imgs[0]) > 0:
+            semantic_imgs = np.array(semantic_imgs).astype(np.uint8)[
+                ..., 0
+            ]  # [view_num, 1, H, W]
+            semantic_imgs = np.squeeze(semantic_imgs, axis=1)
+        else:
+            semantic_imgs = None
 
         if args.has_depth_data:
             depth_imgs = np.array(depth_imgs)  # [view num, H, W]
@@ -185,8 +197,9 @@ class StarAppInitDataset(Dataset):
             rays_d = torch.reshape(rays_d, [-1, 3])  # (H*W, 3)
             target = torch.reshape(target, [-1, 3])  # (H*W, 3)
 
-            if self.has_depth_data:
-                target_depth = self.depth_imgs[idx]
+            target_depth = None
+            #if self.has_depth_data:
+            #    target_depth = self.depth_imgs[idx]
 
         return {
             "rays_o": rays_o,

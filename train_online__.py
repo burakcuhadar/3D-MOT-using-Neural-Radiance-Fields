@@ -2,14 +2,20 @@ import os
 import numpy as np
 import torch
 import pytorch_lightning as pl
+import pypose as pp
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 from torch.utils.data import DataLoader
 from models.star__ import STaR
 import torch.nn as nn
+from einops import rearrange
+from torch import inf
+
 
 import imageio
 
 from pytorch3d.transforms import se3_log_map
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchmetrics import StructuralSimilarityIndexMeasure
 
 
 from pytorch_lightning.utilities import grad_norm
@@ -54,10 +60,16 @@ class StarOnline(pl.LightningModule):
         self.args = args
         self.star_network = star_network
 
+        """
         self.register_parameter(
             "poses",
             nn.Parameter(torch.zeros((args.num_vehicles, args.num_frames - 1, 6)), requires_grad=True),
         )
+        """
+
+        self.poses = nn.ParameterList([
+            nn.Parameter(pp.identity_SE3(args.num_vehicles).tensor().unsqueeze(0)) for i in range(args.num_frames-1)
+        ])
 
         print("self.poses", self.poses)
 
@@ -69,6 +81,8 @@ class StarOnline(pl.LightningModule):
         self.register_buffer("start_frame", torch.tensor([0], dtype=torch.long))
 
         self.training_fine_losses = []
+
+        self.loss = nn.MSELoss()
 
     def forward(self, batch):
         pts, z_vals = sample_pts(
@@ -91,17 +105,30 @@ class StarOnline(pl.LightningModule):
             poses = torch.cat((pose0, batch["gt_relative_poses"][1:, ...]), dim=0)
             pose = poses[batch["frames"][0]][0]"""
 
-            pose = batch["gt_relative_poses"][batch["frames"][0]][0]
-
+            #pose = batch["gt_relative_poses"][:, batch["frames"][0], ...][:,0]
+            
             """pose = self.train_dataset.gt_relative_poses_matrices.to(
                 batch["rays_o"].device
-            )[batch["frames"][0]][0]"""
+            )[:, batch["frames"][0], ...][:,0]"""
+            pose = self.gt_poses[:, batch["frames"][0], ...][:,0]
         elif self.trainer.testing:
             pose = batch["object_pose"]
         else:
+            """
             pose0 = torch.zeros((self.args.num_vehicles, 1, 6), requires_grad=False, device=self.device)
             poses = torch.cat((pose0, self.poses), dim=1)
             pose = poses[:, batch["frames"][0], ...][:, 0] # num_vehicles, 6
+            """
+            
+            pose0 = pp.identity_SE3(self.args.num_vehicles, device=self.device).tensor().unsqueeze(0) # 1 2 7
+            poses = torch.cat(([pose0] + [posei for posei in self.poses]), dim=0) # 15 2 7
+            pose = poses[batch["frames"][0], :, ...][0] # 2 7
+            
+            """
+            pose0 = pp.identity_SE3(device=self.device).tensor().unsqueeze(0)
+            poses = torch.cat(([pose0] + [posei for posei in self.poses]), dim=0)
+            pose = poses[batch["frames"][0]][0]
+            """
 
         return render_star_online(
             self.star_network,
@@ -118,13 +145,15 @@ class StarOnline(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         result = self(batch)
 
-        img_loss = img2mse(result["rgb"], batch["target"])
+        #img_loss = img2mse(result["rgb"], batch["target"])
+        img_loss = self.loss(result["rgb"], batch["target"])
 
-        loss = img_loss
+        #loss = img_loss
         psnr = mse2psnr(img_loss)
-        img_loss0 = img2mse(result["rgb0"], batch["target"])
+        #img_loss0 = img2mse(result["rgb0"], batch["target"])
+        img_loss0 = self.loss(result["rgb0"], batch["target"])
 
-        loss = loss + img_loss0
+        loss = img_loss + img_loss0
         psnr0 = mse2psnr(img_loss0)
         loss += self.args.entropy_weight * (result["entropy"] + result["entropy0"])
 
@@ -146,15 +175,16 @@ class StarOnline(pl.LightningModule):
             loss = loss + self.args.sigma_lambda * sigma_loss
 
         self.training_fine_losses.append(img_loss)
-        self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True)
-        self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("train/psnr", psnr, on_step=False, on_epoch=True)
-        self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
+        self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True, batch_size=self.args.N_rand)
+        self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=self.args.N_rand)
+        self.log("train/psnr", psnr, on_step=False, on_epoch=True, batch_size=self.args.N_rand)
+        self.log("train/psnr0", psnr0, on_step=False, on_epoch=True, batch_size=self.args.N_rand)
+        #TODO implement #self.log("train/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
 
         if self.args.depth_loss:
-            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
+            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True, batch_size=self.args.N_rand)
         if self.args.sigma_loss:
-            self.log("train/sigma_loss", sigma_loss, on_step=False, on_epoch=True)
+            self.log("train/sigma_loss", sigma_loss, on_step=False, on_epoch=True, batch_size=self.args.N_rand)
 
         return loss
 
@@ -175,7 +205,7 @@ class StarOnline(pl.LightningModule):
             lr=self.args.lrate,
             betas=(0.9, 0.999),
         )
-        pose_optimizer = torch.optim.Adam([self.poses], lr=self.args.lrate_pose)
+        pose_optimizer = torch.optim.Adam(self.poses, lr=self.args.lrate_pose)
 
         scheduler = get_scheduler(
             optimizer,
@@ -200,18 +230,30 @@ class StarOnline(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         result = self(batch)
 
-        self.log("val/frame", batch["frames"][0, 0])
-
-        val_mse = img2mse(result["rgb"], batch["target"])
-        psnr = mse2psnr(val_mse)
-
-        self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val/psnr", psnr, on_step=False, on_epoch=True)
-
-        # Log visualizations for the first view (see dataset implementation)
         val_H = self.val_dataset.H
         val_W = self.val_dataset.W
 
+        self.log("val/frame", batch["frames"][0, 0])
+
+        #val_mse = img2mse(result["rgb"], batch["target"])
+        val_mse = self.loss(result["rgb"], batch["target"])
+        psnr = mse2psnr(val_mse)
+        lpips = self.eval_lpips(
+            torch.reshape(result["rgb"], (val_H, val_W, 3)), 
+            torch.reshape(batch["target"], (val_H, val_W, 3))
+        )
+        ssim = self.eval_ssim(
+            torch.reshape(result["rgb"], (val_H, val_W, 3)), 
+            torch.reshape(batch["target"], (val_H, val_W, 3))
+        )
+
+        self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val/psnr", psnr, on_step=False, on_epoch=True)
+        self.log("val/lpips", lpips, on_step=False, on_epoch=True)
+        self.log("val/ssim", ssim, on_step=False, on_epoch=True)
+        #TODO implement #self.log("val/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
+
+        # Log visualizations for the first view (see dataset implementation)
         rgb0 = to8b(
             torch.reshape(result["rgb0"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "rgb0",
@@ -269,35 +311,40 @@ class StarOnline(pl.LightningModule):
         )
         depth_dynamic0s = visualize_depth(result["depth_dynamic0"].transpose(0, 1), val_H, val_W)
 
-        log_val_table_online(
-            self.logger,
-            self.current_epoch,
-            rgb,
-            target,
-            rgb_dynamics,
-            rgb_static,
-            depth,
-            depth_dynamics,
-            depth_static,
-            rgb0,
-            rgb_dynamic0s,
-            rgb_static0,
-            depth0,
-            depth_dynamic0s,
-            depth_static0,
-            z_std,
+        self.logger.log_image(
+            "val/imgs", 
+            [
+                rgb,
+                target,
+                *rgb_dynamics,
+                rgb_static,
+                depth,
+                *depth_dynamics,
+                depth_static,
+                rgb0,
+                *rgb_dynamic0s,
+                rgb_static0,
+                depth0,
+                *depth_dynamic0s,
+                depth_static0,
+                z_std,
+            ], 
+            step=self.global_step
         )
 
         # Log pose metrics
-        trans_error, rot_error, last_trans_error, last_rot_error = get_pose_metrics_multi(
-            self.poses[:, 0 : self.current_frame_num - 1, ...],
-            batch["gt_relative_poses"][:, 1 : self.current_frame_num, ...],
+        trans_errors, rot_errors, last_trans_errors, last_rot_errors, rot_error_eulers, last_rot_error_eulers = get_pose_metrics_multi(
+            #self.poses[:, 0 : self.current_frame_num - 1, ...],
+            torch.cat(list(self.poses[0 : self.current_frame_num - 1]), dim=0),
+            batch["gt_relative_poses"][:, 1 : self.current_frame_num, ...].transpose(0, 1),
         )
         for i in range(self.args.num_vehicles):
-            self.log(f"val/trans_error{i}", trans_error[i])
-            self.log(f"val/rot_error{i}", rot_error[i])
-            self.log(f"val/last_trans_error{i}", last_trans_error[i])
-            self.log(f"val/last_rot_error{i}", last_rot_error[i])
+            self.log(f"val/trans_error{i}", trans_errors[i])
+            self.log(f"val/rot_error{i}", rot_errors[i])
+            self.log(f"val/last_trans_error{i}", last_trans_errors[i])
+            self.log(f"val/last_rot_error{i}", last_rot_errors[i])
+            self.log(f"val/euler_rot_error{i}", rot_error_eulers[i])
+            self.log(f"val/last_euler_rot_error{i}", last_rot_error_eulers[i])
 
         """TODO adapt for multi vehicle
         rpe_trans_rmse, rpe_rot_rmse = evaluate_rpe(
@@ -445,57 +492,31 @@ class StarOnline(pl.LightningModule):
         )
 
         if self.args.load_gt_poses:
-            pass
-            """TODO remove or uncomment: self.register_buffer(
+            self.register_buffer(
                 "gt_poses", self.train_dataset.get_gt_vehicle_poses(self.args)
-            )"""
-        elif self.args.noisy_pose_init:
+            )
+        elif self.args.noisy_pose_init and (self.args.online_ckpt_path is None):
             with torch.no_grad():
-                self.poses += self.train_dataset.get_noisy_gt_relative_poses()[:, 1:, ...].to(
-                    self.device
-                )
-                trans_error, rot_error, last_trans_error, last_rot_error = get_pose_metrics_multi(
-                    self.poses[:, 0 : self.current_frame_num - 1, ...],
-                    self.train_dataset.gt_relative_poses[:, 1 : self.current_frame_num, ...].to(self.device),
-                )
-                
-                """self.logger.experiment.log({
-                    "val/trans_error": trans_error,
-                    "val/rot_error": rot_error,
-                    "val/last_trans_error": last_trans_error,
-                    "val/last_rot_error": last_rot_error
-                })"""
-                print("trans error", trans_error)
-                print("rot error", rot_error)
-                print("last trans error", last_trans_error)
-                print("last rot error", last_rot_error)
+                noisy_poses = self.train_dataset.get_noisy_gt_relative_poses()[:, 1:].to(self.device)
+                for frame_idx in range(noisy_poses.shape[1]):
+                    self.poses[frame_idx].copy_(noisy_poses[:, frame_idx, ...])
 
-                trans_error, rot_error, _, _ = get_pose_metrics_multi(
-                    self.poses,
-                    self.train_dataset.gt_relative_poses[:, 1:, ...].to(self.device),
+                trans_error, rot_error, _, _, _, _ = get_pose_metrics_multi(
+                    torch.cat(list(self.poses), dim=0),
+                    self.train_dataset.gt_relative_poses[:, 1:, ...].transpose(0, 1).to(self.device),
+                    reduce=False
                 )
-                print("total trans error", trans_error)
-                print("total rot error", rot_error)
 
-        # TODO remove!
-        """with torch.no_grad():
-            gt_vehicle_poses = self.train_dataset.get_gt_vehicle_poses(self.args)
-            gt_pose = torch.eye(4, dtype=torch.float32)
-            gt_pose[:3, :3] = gt_vehicle_poses[0, :3, :3]
-            gt_pose[3, :3] = gt_vehicle_poses[0, :3, 3]
-            gt_pose = se3_log_map(gt_pose[None, ...])
-        print("gt pose", gt_pose)
-        self.register_buffer("gt_pose", gt_pose)"""
+                print("total trans errors", trans_error)
+                print("total rot errors", rot_error)
 
-        # TODO remove
-        """with torch.no_grad():
-            gt_poses = torch.eye(4, dtype=torch.float32)
-            gt_poses = gt_poses.repeat(16, 1, 1)
-            gt_poses[:, :3, :3] = gt_vehicle_poses[:, :3, :3]
-            gt_poses[:, 3, :3] = gt_vehicle_poses[:, :3, 3]
-            gt_poses = se3_log_map(gt_poses)
-        print("gt poses", gt_poses)
-        self.register_buffer("gt_poses", gt_poses)"""
+        # Init SSIM metric
+        self.val_ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+        # Init LPIPS metric
+        self.val_lpips = LearnedPerceptualImagePatchSimilarity('vgg', normalize=True)
+        for p in self.val_lpips.net.parameters():
+            p.requires_grad = False
+
 
     def train_dataloader(self):
         return DataLoader(
@@ -521,6 +542,32 @@ class StarOnline(pl.LightningModule):
             num_workers=1,
             pin_memory=True,
         )
+    
+    def on_save_checkpoint(self, checkpoint):
+        for k in list(checkpoint.keys()):
+            if k.startswith("val_lpips") or k.startswith("val_ssim"):
+                checkpoint.pop(k)
+    
+    def eval_lpips(self, pred_img, gt_img):
+        # Rearrange for torchmetrics library
+        pred_img_rearranged = rearrange(pred_img[None, ...], "B H W C -> B C H W")
+        gt_img_rearranged = rearrange(gt_img[None, ...], "B H W C -> B C H W")
+
+        self.val_lpips(torch.clip(pred_img_rearranged, 0, 1), torch.clip(gt_img_rearranged, 0, 1))
+        lpips = self.val_lpips.compute()
+        self.val_lpips.reset()
+        return lpips
+    
+    def eval_ssim(self, pred_img, gt_img):
+        # Rearrange for torchmetrics library
+        pred_img_rearranged = rearrange(pred_img[None, ...], "B H W C -> B C H W")
+        gt_img_rearranged = rearrange(gt_img[None, ...], "B H W C -> B C H W")
+
+        self.val_ssim(pred_img_rearranged, gt_img_rearranged)
+        ssim = self.val_ssim.compute()
+        self.val_ssim.reset()
+        return ssim
+
 
 
 def create_model(args):
@@ -542,6 +589,7 @@ def train(args, model):
     logger = WandbLogger(project=args.expname)
     logger.watch(model, log="all")
     logger.experiment.config.update(args)
+    logger.experiment.log_code(root=args.code_dir)
 
     configure_logger(f"logs/online/{logger.version}", "training.log")
     logging.info(f"Slurm job id is {args.job_id}")
@@ -577,6 +625,7 @@ def train(args, model):
         num_sanity_val_steps=0,
         accumulate_grad_batches=args.accumulate_grad_batches,
         reload_dataloaders_every_n_epochs=1,
+        gradient_clip_val=1.0,
         # detect_anomaly=True,
         # profiler="simple",
     )
@@ -594,11 +643,17 @@ if __name__ == "__main__":
         torch.cuda.get_device_properties(0).total_memory / 1073741824,
     )
 
+    np.seterr(all="raise", under="warn")
+    torch.set_warn_always(True)
+    torch.set_printoptions(precision=20, threshold=inf)
+
     set_matmul_precision()
-    seed_everything(42, workers=True)
+    #seed_everything(42, workers=True)
+    seed_everything(1453, workers=True)
 
     parser = config_parser()
     args = parser.parse_args()
+
     model = create_model(args)
 
     train(args, model)

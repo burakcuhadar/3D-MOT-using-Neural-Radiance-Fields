@@ -111,7 +111,13 @@ def sample_pts(
 
 
 def render_star_appinit(
-    star_network, pts, viewdirs, z_vals, rays_o, rays_d, N_importance
+    star_network, 
+    pts, 
+    viewdirs, 
+    z_vals, 
+    rays_o, 
+    rays_d, 
+    N_importance
 ):
     # Pass through coarse network
     result_coarse = star_network(pts, viewdirs, z_vals, rays_d, is_coarse=True)
@@ -165,7 +171,6 @@ def render_nerf(
         rays_d,
         nerf_coarse.raw_noise_std if nerf_coarse.training else 0,
         nerf_coarse.white_bkgd,
-        ret_entropy=False,
         far_dist=far_dist,
     )
 
@@ -192,7 +197,6 @@ def render_nerf(
         rays_d,
         nerf_fine.raw_noise_std if nerf_fine.training else 0,
         nerf_fine.white_bkgd,
-        ret_entropy=False,
         far_dist=far_dist,
     )
 
@@ -218,7 +222,7 @@ def render_star_online(
     rays_o: TensorType["num_rays", 3],
     rays_d: TensorType["num_rays", 3],
     N_importance: int,
-    pose: Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 6]],
+    pose: Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 7]],
     step: Optional[int] = None,
 ) -> StarRenderOutput:
     if N_importance <= 0:
@@ -229,7 +233,7 @@ def render_star_online(
     )
 
     # Hierarchical volume sampling
-    z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    """z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
     z_samples = sample_pdf(
         z_vals_mid,
         result_coarse["weights"][..., 1:-1],
@@ -237,8 +241,12 @@ def render_star_online(
         det=(not star_network.training),
     )
     z_samples = z_samples.detach()
+    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)"""
 
-    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+    z_samples = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    z_samples.detach()
+    #z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+
     pts = (
         rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
     )  # [N_rays, N_samples + N_importance, 3]
@@ -248,7 +256,9 @@ def render_star_online(
     )
 
     result = {}
-    result |= result_fine
+    #result |= result_fine
+    for k, v in result_fine.items():
+        result[k] = v
     for k, v in result_coarse.items():
         result[f"{k}0"] = v
 
@@ -258,8 +268,8 @@ def render_star_online(
 
 
 def raw2alpha(raw, dists, act_fn=F.relu):
-    return 1.0 - torch.exp(-act_fn(raw) * dists)
-
+    #return 1.0 - torch.exp(-act_fn(raw) * dists)
+    return 1.0 - torch.exp(-F.softplus(raw) * dists)
 
 @typechecked
 def raw2outputs(
@@ -267,10 +277,9 @@ def raw2outputs(
     raw_rgb: TensorType["num_rays", "num_samples", 3],
     z_vals: TensorType["num_rays", "num_samples"],
     rays_d: TensorType["num_rays", 3],
-    raw_noise_std=0,
-    white_bkgd=False,
-    ret_entropy=False,
-    far_dist=1e10,
+    raw_noise_std: float,
+    white_bkgd: bool,
+    far_dist: float,
 ) -> NerfNetworkOutput:
     device = raw_alpha.device
 
@@ -282,6 +291,11 @@ def raw2outputs(
     )
 
     dists = dists * torch.norm(rays_d[..., None, :], dim=-1)
+    # if torch.any(dists <= 1e-10):
+    #     if dists[dists <= 1e-10].shape[0] > 100:
+    #         #print("dists has 0: ", dists[dists <= 1e-10].shape[0])
+    #         print(z_vals)
+    #TODO #zero_dist_count = dists[dists <= 1e-10].shape[0]
 
     rgb = torch.sigmoid(raw_rgb)  # [N_rays, N_samples, 3]
     noise = 0.0
@@ -289,8 +303,7 @@ def raw2outputs(
         noise = torch.randn(raw_alpha.shape) * raw_noise_std
 
     alpha = raw2alpha(raw_alpha + noise, dists)  # [N_rays, N_samples]
-    # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
-
+    
     weights = (
         alpha
         * torch.cumprod(
@@ -307,7 +320,7 @@ def raw2outputs(
 
     weights_sum = torch.sum(weights, -1)
     weights_sum = torch.where(
-        weights_sum >= 0, weights_sum, torch.finfo(torch.float32).eps
+        weights_sum >= 0, weights_sum, 1e-7
     )
     disp_map = 1.0 / torch.max(
         1e-10 * torch.ones_like(depth_map), depth_map / weights_sum
@@ -325,6 +338,7 @@ def raw2outputs(
         "depth": depth_map,
         "dists": dists,  # used for sigma loss
         "z_vals": z_vals,  # used for sigma loss
+        #TODO #"zero_dist_count": zero_dist_count
     }
 
     # I think in the paper they dont use regularization for appearance init. But it may still be helpful,

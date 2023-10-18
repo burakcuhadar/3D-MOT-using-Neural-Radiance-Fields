@@ -27,6 +27,25 @@ def log_val_table_app_init(
     ]
     logger.log_table(key="val table", columns=columns, data=data)
 
+def log_val_table_app_init_nerfacc(
+    logger, epoch, rgb, rgb_gt, depth
+):
+    columns = [
+        "epoch",
+        "rgb",
+        "gt rgb",
+        "depth"
+    ]
+    data = [
+        [
+            epoch,
+            wandb.Image(rgb),
+            wandb.Image(rgb_gt),
+            wandb.Image(depth),
+        ]
+    ]
+    logger.log_table(key="val table", columns=columns, data=data)
+
 
 def log_val_table_app_init_semantic(
     logger, epoch, rgb_car, rgb_noncar, rgb_gt, rgb0_car, rgb0_noncar

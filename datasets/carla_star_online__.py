@@ -2,13 +2,16 @@ import torch
 import os
 from glob import glob
 import numpy as np
+import pypose as pp
 import imageio
 import logging
 import time
+from scipy.spatial.transform import Rotation
+
 
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
-from models.rendering import get_rays, get_rays_np
+from models.rendering__ import get_rays, get_rays_np
 from utils.dataset import (
     load_intrinsics,
     natural_keys,
@@ -168,7 +171,10 @@ class StarOnlineDataset(Dataset):
                 if i < 50:
                     continue
                 # Currently, I skip the problematic val view
-                if i == len(cameras) - 1:
+                # if i == len(cameras) - 1:
+                #    continue
+            elif self.split == "test":
+                if i <= 55:
                     continue
 
             logging.info(f"{cam} goes to {self.split}")
@@ -395,12 +401,12 @@ class StarOnlineDataset(Dataset):
         with torch.no_grad():
             self.gt_relative_poses_matrices = torch.from_numpy(poses_matrices)
 
-        poses = np.zeros((self.num_vehicles, self.num_frames, 6), dtype=np.float32)
+        poses = np.zeros((self.num_vehicles, self.num_frames, 7), dtype=np.float32)
         for j in range(self.num_vehicles):
             poses[j, :, :] = se3_log_map(poses_matrices[j])
 
         assert poses_matrices.shape == (self.num_vehicles, self.num_frames, 4, 4), "Vehicles poses are not read correctly!"
-        assert poses.shape == (self.num_vehicles, self.num_frames, 6), "Vehicles poses are not read correctly!"
+        assert poses.shape == (self.num_vehicles, self.num_frames, 7), "Vehicles poses are not read correctly!"
 
         return poses
 
@@ -411,11 +417,38 @@ class StarOnlineDataset(Dataset):
         noisy_poses = torch.zeros_like(self.gt_relative_poses)
 
         for i in range(self.num_vehicles):
+            """
             rot_noise = torch.randn((self.gt_relative_poses.shape[1] - 1, 3), dtype=torch.float32) / 10.0
             trans_noise = torch.randn((self.gt_relative_poses.shape[1] - 1, 3), dtype=torch.float32) / 100.0
             noisy_poses[i] += self.gt_relative_poses[i]
             noisy_poses[i, 1:, :3] += trans_noise
             noisy_poses[i, 1:, 3:] += rot_noise
+            """
+            gt_rot_euler = pp.SE3(self.gt_relative_poses[i]).rotation().euler().numpy()
+            print(f"gt_rot_euler for vehicle {i}\n", gt_rot_euler)
+            gt_trans = pp.SE3(self.gt_relative_poses[i]).translation().numpy()
+            
+            rot_noise = np.random.randn(self.gt_relative_poses.shape[1] - 1) * np.pi / 16 - np.pi / 32
+            trans_noise = np.random.randn(self.gt_relative_poses.shape[1] - 1, 3) / 1000.0
+            
+            noisy_rot = np.zeros((self.gt_relative_poses.shape[1], 3))
+            noisy_rot += gt_rot_euler
+            noisy_rot[1:, 1] += rot_noise # we only add noise to y-axis rotation
+
+            noisy_trans = np.zeros((self.gt_relative_poses.shape[1], 3))
+            noisy_trans += gt_trans
+            noisy_trans[1:, ...] += trans_noise
+
+            noisy_pose_matrix = np.eye(4, dtype=np.float32)[None, ...].repeat(self.gt_relative_poses.shape[1], axis=0)
+            noisy_pose_matrix[:, :3, :3] = Rotation.from_euler("xyz", noisy_rot).as_matrix()
+            noisy_pose_matrix[:, :3, 3] = noisy_trans
+
+            noisy_poses_log = se3_log_map(noisy_pose_matrix)
+            noisy_poses_log = torch.from_numpy(noisy_poses_log)    
+            
+            noisy_poses[i,:,:] = noisy_poses_log
+            
+        assert noisy_poses.shape == (self.num_vehicles, self.num_frames, 7), "Noisy poses are not created correctly!"
         
         print("noisy poses", noisy_poses)
         return noisy_poses

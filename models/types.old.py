@@ -10,6 +10,7 @@ class NerfNetworkOutput(TypedDict):
     depth: TensorType["num_rays"]
     dists: TensorType["num_rays", "num_samples"]
     z_vals: TensorType["num_rays", "num_samples"]
+    zero_dist_count: int
 
 
 class StarNetworkOutput(TypedDict):
@@ -26,7 +27,7 @@ class StarNetworkOutput(TypedDict):
     dists: TensorType["num_rays", "num_samples_"]
     entropy: TensorType[()]
     z_vals: TensorType["num_rays", "num_samples_"]
-
+    zero_dist_count: int
 
 class StarRenderOutput(StarNetworkOutput):
     rgb0: TensorType["num_rays", 3]
@@ -42,3 +43,4 @@ class StarRenderOutput(StarNetworkOutput):
     entropy0: TensorType[()]
     z_vals0: TensorType["num_rays", "num_samples"]
     z_std: TensorType["num_rays"]
+    zero_dist_count0: int

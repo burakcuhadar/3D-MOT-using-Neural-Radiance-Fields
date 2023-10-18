@@ -32,11 +32,12 @@ def load_star_network_from_ckpt(ckpt_path, star_network):
     ckpt = torch.load(ckpt_path)
     state_dict = OrderedDict()
     for key in ckpt["state_dict"]:
-        if key.startswith("star_network"):
+        if key.startswith("star_network") and ("dynamic" not in key):
             state_dict[key.split("star_network", 1)[1][1:]] = ckpt["state_dict"][key]
 
-    star_network.load_state_dict(state_dict)
-
+    missing_keys, unexpected_keys = star_network.load_state_dict(state_dict, strict=False)
+    print(f"missing keys: {missing_keys}")
+    print(f"unexpected keys: {unexpected_keys}")
 
 def config_parser():
     import configargparse
@@ -263,6 +264,12 @@ def config_parser():
         default=0.0,
         help="std dev of noise added to regularize sigma_a output, 1e0 recommended",
     )
+    parser.add_argument(
+        "--code_dir",
+        type=str,
+        default=".",   
+        help="directory of the code to be logged on wandb",
+    )
 
     parser.add_argument(
         "--save_video_frames",
@@ -404,6 +411,13 @@ def config_parser():
         "--sigma_loss", action="store_true", help="train with sigma loss"
     )
     parser.add_argument("--sigma_lambda", type=float, help="sigma lambda used for loss")
+
+    # occgrid options
+    parser.add_argument("--grid_resolution", type=int, default=128)
+    parser.add_argument("--grid_nlvl", type=int, default=1)
+    parser.add_argument("--render_step_size", type=float, default=5e-3)
+    parser.add_argument("--target_sample_batch_size", type=int, default=(1<<16))
+
 
     return parser
 

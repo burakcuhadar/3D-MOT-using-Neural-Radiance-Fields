@@ -2,25 +2,26 @@ import os
 import wandb
 import numpy as np
 import torch
+import torch._dynamo
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 from utils.logging import log_val_table_app_init
 from torch.utils.data import DataLoader
-from models.star__ import STaR
-from torch import inf
+from models.star import STaR
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import TQDMProgressBar, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning import Trainer, seed_everything
 
-from models.rendering__ import sample_pts, render_star_appinit
-from models.rendering__ import mse2psnr, img2mse, to8b
+from models.rendering import sample_pts, render_star_appinit
+from models.rendering import mse2psnr, img2mse, to8b
 from models.loss import compute_sigma_loss
-from datasets.carla_star_app_init import StarAppInitDataset
+#from datasets.carla_star_app_init import StarAppInitDataset
+from datasets.lego import LegoDataset
 from utils.visualization import visualize_depth
 from utils.io import *
-from callbacks.check_batch_grad import CheckBatchGradient
+#from callbacks.check_batch_grad import CheckBatchGradient
 
 
 def get_scheduler(args, optimizer):
@@ -75,25 +76,6 @@ class StarAppInit(pl.LightningModule):
         img_loss0 = img2mse(result["rgb0"], batch["target"])
         loss = loss + img_loss0
 
-        if self.args.depth_loss:
-            depth_loss = compute_depth_loss(
-                result["depth"],
-                batch["target_depth"],
-                self.train_dataset.near,
-                self.train_dataset.far,
-            )
-            loss = loss + self.args.depth_lambda * depth_loss
-        if self.args.sigma_loss:
-            sigma_loss = compute_sigma_loss(
-                result["weights"],
-                result["z_vals"],
-                result["dists"],
-                batch["target_depth"],
-                self.train_dataset.near,
-                self.train_dataset.far,
-            )
-            loss = loss + self.args.sigma_lambda * sigma_loss
-
         psnr = mse2psnr(img_loss)
         psnr0 = mse2psnr(img_loss0)
 
@@ -101,12 +83,6 @@ class StarAppInit(pl.LightningModule):
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/psnr", psnr, on_step=False, on_epoch=True)
         self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
-        #TODO # self.log("train/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
-
-        if self.args.depth_loss:
-            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
-        if self.args.sigma_loss:
-            self.log("train/sigma_loss", sigma_loss, on_step=False, on_epoch=True)
 
         return loss
 
@@ -128,7 +104,6 @@ class StarAppInit(pl.LightningModule):
 
         self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/psnr", psnr, on_step=False, on_epoch=True)
-        #TODO #self.log("val/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
 
         # Log visualizations for a random view (see dataset implementation)
         val_H = self.val_dataset.H
@@ -138,7 +113,7 @@ class StarAppInit(pl.LightningModule):
             torch.reshape(result["rgb0"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "rgb0",
         )
-        depth0 = visualize_depth(result["depth0"]).reshape((val_H, val_W, 3))
+        depth0 = visualize_depth(result["depth0"], app_init=True).reshape((val_H, val_W, 3))
         z_std = to8b(
             torch.reshape(result["z_std"], (val_H, val_W, 1)).cpu().detach().numpy(),
             "z_std",
@@ -147,12 +122,12 @@ class StarAppInit(pl.LightningModule):
             torch.reshape(result["rgb"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "rgb",
         )
-        depth = visualize_depth(result["depth"]).reshape((val_H, val_W, 3))
+        depth = visualize_depth(result["depth"], app_init=True).reshape((val_H, val_W, 3))
         target = to8b(
             torch.reshape(batch["target"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "target",
         )
-        #target_depth = visualize_depth(batch["target_depth"]).reshape((val_H, val_W, 3))
+        #target_depth = visualize_depth(batch["target_depth"], app_init=True).reshape((val_H, val_W, 3))
 
         log_val_table_app_init(
             self.logger,
@@ -166,8 +141,8 @@ class StarAppInit(pl.LightningModule):
         )
 
     def setup(self, stage):
-        self.train_dataset = StarAppInitDataset(self.args, split="train")
-        self.val_dataset = StarAppInitDataset(self.args, split="val")
+        self.train_dataset = LegoDataset(self.args, split="train")
+        self.val_dataset = LegoDataset(self.args, split="val")
 
     def train_dataloader(self):
         return DataLoader(
@@ -241,5 +216,4 @@ if __name__ == "__main__":
     print("torch cuda version", torch.version.cuda)
     set_matmul_precision()
     seed_everything(42, workers=True)
-    torch.set_printoptions(precision=20, threshold=inf)
     train()

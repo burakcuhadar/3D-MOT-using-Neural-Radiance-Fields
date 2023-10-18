@@ -1,12 +1,16 @@
-expname = lightning_online
+expname = lightning_online_two_vehicle
+code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
 basedir = ./logs
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
 has_depth_data = True
 num_frames = 15
 num_vehicles = 2
 
 #appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/nh0qyl6d/epoch=43.ckpt
-online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/zi0faekg/epoch=80.ckpt
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/wcy5lak4/epoch=43.ckpt
+
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/zi0faekg/epoch=80.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/gsxg1uwx/epoch=29.ckpt
 
 car_sample_ratio = 0
 
@@ -55,7 +59,7 @@ num_workers = 4
 epochs_online = 10000
 #TODO eliminate epoch_print?
 epoch_print = 1
-epoch_val = 1
+epoch_val = 10
 
 #no_batching = True
 #epochs_appearance = 5000
@@ -75,6 +79,4 @@ end_barf = -1
 no_test_set = True
 save_video_frames = True
 
-
-#TODO eliminate use_viewdirs
 use_viewdirs = True

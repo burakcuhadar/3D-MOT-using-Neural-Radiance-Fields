@@ -1,26 +1,39 @@
 expname = lightning_online
+code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
 basedir = ./logs
-datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
+#datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_with_test_poses
 has_depth_data = True
 num_frames = 16
+num_vehicles = 1
 
 # without depth supervision
-#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/ckpts/appinit/8nu6o4lp/lightning_appinit/epoch=79.ckpt
-# with depth supervision (depth loss, without masking)
-#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mnj18chc/epoch=70.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/hf3eovzu/epoch=44.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/pmf8wmzk/epoch=44.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mj4z8phs/epoch=40.ckpt
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/bbhxixo1/epoch=40.ckpt
 
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/s7l0s0tf/epoch=64.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/s7o7h9ls/epoch=182.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/3uzu10x3/epoch=170.ckpt
-online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/3uzu10x3/epoch=65.ckpt
+# with depth supervision (depth loss, without masking)
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mnj18chc/epoch=70.ckpt
+
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/9bo0rndb/epoch=283.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/9cc9h7sw/epoch=164.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/8x1rn9d4/epoch=59.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/vd1bcgtq/epoch=129.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/t2dhxslx/epoch=439.ckpt
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/et2mf2vj/epoch=709.ckpt
+
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/20mw7pl9/epoch=39.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/ninw6gqn/epoch=29.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/z41u3oed/epoch=99.ckpt
 
 car_sample_ratio = 0
 
-load_gt_poses = False
-noisy_pose_init = True
+load_gt_poses = True
+noisy_pose_init = False
 
-#depth_loss = True
-#depth_lambda = 0.01
+# depth_loss = True
+# depth_lambda = 0.01
 far_dist = 1e10
 
 
@@ -61,7 +74,7 @@ num_workers = 4
 epochs_online = 10000
 #TODO eliminate epoch_print?
 epoch_print = 1
-epoch_val = 1
+epoch_val = 5
 
 #no_batching = True
 #epochs_appearance = 5000
@@ -81,6 +94,4 @@ end_barf = -1
 no_test_set = True
 save_video_frames = True
 
-
-#TODO eliminate use_viewdirs
 use_viewdirs = True

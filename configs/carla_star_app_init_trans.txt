@@ -4,8 +4,8 @@ datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/da
 has_depth_data = True
 num_frames = 17
 
-depth_loss = True
-depth_lambda = 0.01
+#depth_loss = True
+#depth_lambda = 0.01
 
 #TODO eliminate use_viewdirs
 use_viewdirs = True
