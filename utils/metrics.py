@@ -1,11 +1,23 @@
-
-
 import random
 import numpy as np
 import pypose as pp
 import torch
 from lietorch import SO3, SE3
-from .dataset import to_rotvec, to_euler, rotation_metric
+from .dataset import (
+    to_rotvec,
+    to_euler,
+    rotation_metric,
+    from_ue4_to_nerf,
+    from_ue4_to_nerf_pts,
+    invert_transformation,
+)
+from models.types__ import StarRenderOutput
+from utils import constants
+
+
+# from bbox import BBox3D
+from pytorch3d.ops import box3d_overlap
+
 
 # Using Section 3.2 metric(see https://www.cs.cmu.edu/~cga/dynopt/readings/Rmetric.pdf)
 def euler_metric(poses1, poses2):
@@ -13,23 +25,24 @@ def euler_metric(poses1, poses2):
     poses2 = to_euler(poses2)
     return np.sqrt(np.sum((poses1 - poses2) ** 2, axis=1))
 
+
 @torch.no_grad()
 def get_pose_metrics(poses, gt_poses, reduce=True):
     assert poses.shape[0] == gt_poses.shape[0]
     device = poses.device
-    #poses = poses.cpu().numpy()
-    #gt_poses = SE3.exp(gt_poses).matrix()
-    #poses = SE3.exp(poses).matrix()
+    # poses = poses.cpu().numpy()
+    # gt_poses = SE3.exp(gt_poses).matrix()
+    # poses = SE3.exp(poses).matrix()
     gt_poses = pp.SE3(gt_poses).matrix()
     poses = pp.SE3(poses).matrix()
-    
-    '''if poses.shape[1] == 7:
-        #poses = SE3.exp(poses).log()
-        poses = torch.from_numpy(to_rotvec(poses.cpu().numpy())).to(gt_poses.device)'''
 
-    #gt_translation = gt_poses[:, :3]
-    #gt_rotation = gt_poses[:, 3:]
-    
+    """if poses.shape[1] == 7:
+        #poses = SE3.exp(poses).log()
+        poses = torch.from_numpy(to_rotvec(poses.cpu().numpy())).to(gt_poses.device)"""
+
+    # gt_translation = gt_poses[:, :3]
+    # gt_rotation = gt_poses[:, 3:]
+
     if len(poses.shape) == 2:
         rotation = poses[:3, :3]
         translation = poses[:3, 3]
@@ -38,7 +51,7 @@ def get_pose_metrics(poses, gt_poses, reduce=True):
         translation = poses[:, :3, 3]
     else:
         raise ValueError("poses must be either 2 or 3 dimensional")
-    
+
     if len(gt_poses.shape) == 2:
         gt_rotation = gt_poses[:3, :3]
         gt_translation = gt_poses[:3, 3]
@@ -47,7 +60,7 @@ def get_pose_metrics(poses, gt_poses, reduce=True):
         gt_translation = gt_poses[:, :3, 3]
     else:
         raise ValueError("poses must be either 2 or 3 dimensional")
-    
+
     gt_rotation = gt_rotation.cpu().numpy()
     gt_translation = gt_translation.cpu().numpy()
     rotation = rotation.cpu().numpy()
@@ -63,43 +76,66 @@ def get_pose_metrics(poses, gt_poses, reduce=True):
     else:
         raise ValueError("poses must be either 6 or 7 dimensional")
     """
-        
+
     if reduce:
         trans_error = np.mean(
             np.sqrt(np.sum((translation - gt_translation) ** 2, axis=1))
         )
-        #rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
+        # rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1).mean()
         rot_error = np.mean(rotation_metric(rotation, gt_rotation), axis=0)
         rot_error_euler = np.mean(euler_metric(rotation, gt_rotation), axis=0)
     else:
         trans_error = np.sqrt(np.sum((translation - gt_translation) ** 2, axis=1))
-        #rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1)
+        # rot_error = torch.sum(torch.abs(rotation - gt_rotation), dim=1)
         rot_error = rotation_metric(rotation, gt_rotation)
         rot_error_euler = euler_metric(rotation, gt_rotation)
 
     last_trans_error = np.sqrt(np.sum((translation[-1] - gt_translation[-1]) ** 2))
-    #last_rot_error = torch.sum(torch.abs(rotation[-1] - gt_rotation[-1]))
-    last_rot_error = rotation_metric(rotation[-1][None, ...], gt_rotation[-1][None, ...])[0]
-    last_rot_error_euler = euler_metric(rotation[-1][None, ...], gt_rotation[-1][None, ...])[0]
+    # last_rot_error = torch.sum(torch.abs(rotation[-1] - gt_rotation[-1]))
+    last_rot_error = rotation_metric(
+        rotation[-1][None, ...], gt_rotation[-1][None, ...]
+    )[0]
+    last_rot_error_euler = euler_metric(
+        rotation[-1][None, ...], gt_rotation[-1][None, ...]
+    )[0]
 
     if not reduce:
         trans_error = torch.from_numpy(trans_error).to(device)
         rot_error = torch.from_numpy(rot_error).to(device)
-    
-    return trans_error, rot_error, last_trans_error, last_rot_error, rot_error_euler, last_rot_error_euler
 
-#TODO rewrite according to get_pose_metrics
+    return (
+        trans_error,
+        rot_error,
+        last_trans_error,
+        last_rot_error,
+        rot_error_euler,
+        last_rot_error_euler,
+    )
+
+
 def get_pose_metrics_multi(poses, gt_poses, reduce=True):
     assert poses.shape[0] == gt_poses.shape[0]
     assert poses.shape[1] == gt_poses.shape[1]
 
     num_vehicles = poses.shape[1]
 
-    trans_errors, rot_errors, last_trans_errors, last_rot_errors, rot_error_eulers, last_rot_error_eulers = [], [], [], [], [], []
+    (
+        trans_errors,
+        rot_errors,
+        last_trans_errors,
+        last_rot_errors,
+        rot_error_eulers,
+        last_rot_error_eulers,
+    ) = ([], [], [], [], [], [])
     for i in range(num_vehicles):
-        trans_error, rot_error, last_trans_error, last_rot_error, rot_error_euler, last_rot_error_euler = get_pose_metrics(
-            poses[:,i], gt_poses[:,i], reduce=reduce
-        )
+        (
+            trans_error,
+            rot_error,
+            last_trans_error,
+            last_rot_error,
+            rot_error_euler,
+            last_rot_error_euler,
+        ) = get_pose_metrics(poses[:, i], gt_poses[:, i], reduce=reduce)
 
         trans_errors.append(trans_error)
         rot_errors.append(rot_error)
@@ -108,10 +144,17 @@ def get_pose_metrics_multi(poses, gt_poses, reduce=True):
         rot_error_eulers.append(rot_error_euler)
         last_rot_error_eulers.append(last_rot_error_euler)
 
-    return trans_errors, rot_errors, last_trans_errors, last_rot_errors, rot_error_eulers, last_rot_error_eulers
+    return (
+        trans_errors,
+        rot_errors,
+        last_trans_errors,
+        last_rot_errors,
+        rot_error_eulers,
+        last_rot_error_eulers,
+    )
+
 
 # Code below is adapted from https://vision.in.tum.de/data/datasets/rgbd-dataset/tools#evaluation
-
 def find_closest_index(L, t):
     """
     Find the index of the closest value in a list.
@@ -414,3 +457,90 @@ def evaluate_ate(star_poses, gt_poses):
     # print("absolute_translational_error.max %f m" % np.max(trans_error))
 
     return trans_rmse
+
+
+def get_local_vertices(bbox_obj, scale_factor):
+    num_vehicles = len(bbox_obj)
+    n_local_vertices = np.zeros((num_vehicles, 8, 3), dtype=np.float32)
+
+    for i in range(num_vehicles):
+        local_vertices = np.asarray(bbox_obj[i]["local_vertices"], dtype=np.float32)
+        print("raw local_vertices\n", local_vertices)
+        local_vertices = scale_factor * from_ue4_to_nerf_pts(local_vertices)
+        n_local_vertices[i] = local_vertices
+
+    print("scaled and nerfed\n", n_local_vertices)
+
+    # num_vehicles, 8, 3
+    return n_local_vertices
+
+
+def carla_to_p3d_vertices(bbox):
+    idx = np.asarray([7, 5, 4, 6, 3, 1, 0, 2])
+    return bbox[:, idx, :]
+
+
+@torch.no_grad()
+def compute_3d_iou(
+    pose,  # estimated pose, (num_vehicles, 4, 4)
+    gt_pose,  # world to vehicle pose, (num_vehicles, 4, 4)
+    local_vertices,  # (num_vehicles, 8, 3)
+):
+    num_vehicles = gt_pose.shape[0]
+    assert pose.shape == (num_vehicles, 4, 4), f"wrong pose shape:{pose.shape}"
+    assert gt_pose.shape == (num_vehicles, 4, 4), f"wrong gt_pose shape:{gt_pose.shape}"
+    assert local_vertices.shape == (
+        num_vehicles,
+        8,
+        3,
+    ), f"wrong local vertices shape:{local_vertices.shape}"
+
+    local_vertices_homog = np.concatenate(
+        (local_vertices, np.ones((num_vehicles, 8, 1), dtype=np.float32)), axis=-1
+    )
+
+    bboxes = np.einsum("vij,vnj->vni", pose, local_vertices_homog)[..., :3]
+    gt_bboxes = np.einsum("vij,vnj->vni", gt_pose, local_vertices_homog)[..., :3]
+
+    _, iou_3d = box3d_overlap(
+        torch.from_numpy(carla_to_p3d_vertices(bboxes)),
+        torch.from_numpy(carla_to_p3d_vertices(gt_bboxes)),
+    )
+    ious = iou_3d.numpy().diagonal()
+
+    assert bboxes.shape == (num_vehicles, 8, 3), f"wrong bboxes shape: {bboxes.shape}"
+    assert gt_bboxes.shape == (
+        num_vehicles,
+        8,
+        3,
+    ), f"wrong bboxes shape: {gt_bboxes.shape}"
+    assert ious.shape == (num_vehicles,), f"wrong ious shape: {ious.shape}"
+
+    return ious, bboxes, gt_bboxes
+
+
+@torch.no_grad()
+def compute_2d_iou(dynamic_transmittance, semantic_mask, thres=0.1):
+    num_vehicles = dynamic_transmittance.shape[1]
+    num_rays = dynamic_transmittance.shape[0]
+
+    semantic_mask = semantic_mask.detach().cpu().numpy()
+    predicted_union = np.zeros((num_rays), dtype=bool)
+    predicted_masks = np.zeros((num_vehicles, num_rays), dtype=bool)
+
+    for i in range(num_vehicles):
+        predicted_mask = dynamic_transmittance[:, i] < thres  # N_rays
+        predicted_mask = predicted_mask.cpu().numpy()
+        predicted_masks[i] = predicted_mask
+
+        predicted_union = np.logical_or(predicted_union, predicted_mask)
+
+    union = np.count_nonzero(np.logical_or(semantic_mask, predicted_union))
+    intersection = np.count_nonzero(np.logical_and(semantic_mask, predicted_union))
+
+    if union == 0:
+        iou = 0
+    else:
+        iou = intersection / union
+
+    return iou, predicted_masks

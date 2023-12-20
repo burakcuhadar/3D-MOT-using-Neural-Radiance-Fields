@@ -1,6 +1,16 @@
+import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import Callback
 from utils.metrics import get_pose_metrics_multi
+import numpy as np
+from utils.optim import get_scheduler
+from optimizer.hybrid_optimizer import HybridOptim, HybridLRS
+from pytorch_lightning.core.optimizer import (
+    LightningOptimizer,
+    _configure_schedulers_automatic_opt,
+    _configure_schedulers_manual_opt,
+)
+
 
 """
 Callback to handle early stopping when num of frames is reached,
@@ -78,44 +88,57 @@ class StarOnlineCallback(Callback):
     """
 
     @torch.no_grad()
-    def on_train_epoch_end(self, trainer, pl_module):
+    def on_train_epoch_end(self, trainer, pl_module: pl.LightningModule):
         avg_loss = torch.stack(pl_module.training_fine_losses).mean().cpu().item()
-        
+
         if pl_module.current_frame_num == self.args.initial_num_frames:
             if avg_loss <= self.online_thres:
                 # pl_module.start_frame = torch.tensor([2], dtype=pl_module.start_frame.dtype, device=pl_module.start_frame.device)
-                #pl_module.start_frame += 1
+                # pl_module.start_frame += 1
                 pl_module.current_frame_num += 1
                 torch.cuda.synchronize(device=pl_module.device)
 
-                # freeze starting pose
-                #pl_module.poses[0].requires_grad = False
+                # freeze second frame pose
+                # pl_module.poses[0].requires_grad = False
 
-                pl_module.logger.log_metrics({"train/current_frame_num": pl_module.current_frame_num})
-                pl_module.logger.log_metrics({"train/start_frame": pl_module.start_frame})
+                pl_module.logger.log_metrics(
+                    {"train/current_frame_num": pl_module.current_frame_num}
+                )
+                pl_module.logger.log_metrics(
+                    {"train/start_frame": pl_module.start_frame}
+                )
 
                 # Set new threshold
-                #self.online_thres = 8e-4
+                self.online_thres = 95e-5
+                # Decrease lr of nerfs
+                # for g in pl_module.optimizers().optimizer.optimizers[0].param_groups:
+                #     g["lr"] = 1e-5
 
-                #TODO freeze nerf?
-                """
-                for p in pl_module.star_network.parameters():
-                    p.requires_grad = False
-                """    
+                # freeze nerf?
+                # for p in pl_module.star_network.parameters():
+                #     p.requires_grad = False
+                #     p.grad = None
+
+                # Reload optimizer and scheduler since we updated start_frame
+                # trainer.strategy.setup(trainer)
 
         else:
             self.count = self.count + 1
-            if self.count > 40 and avg_loss <= self.online_thres:
+            if self.count > 70 and avg_loss <= self.online_thres:
                 self.count = 0
-                #pl_module.start_frame += 1
+                # pl_module.start_frame += 1
                 pl_module.current_frame_num += 1
                 torch.cuda.synchronize(device=pl_module.device)
 
                 # freeze starting pose
-                #pl_module.poses[pl_module.start_frame-1].requires_grad = False
+                # pl_module.poses[pl_module.start_frame - 1].requires_grad = False
 
-                pl_module.logger.log_metrics({"train/current_frame_num": pl_module.current_frame_num})
-                pl_module.logger.log_metrics({"train/start_frame": pl_module.start_frame})
+                pl_module.logger.log_metrics(
+                    {"train/current_frame_num": pl_module.current_frame_num}
+                )
+                pl_module.logger.log_metrics(
+                    {"train/start_frame": pl_module.start_frame}
+                )
 
         pl_module.training_fine_losses.clear()
 
@@ -123,8 +146,8 @@ class StarOnlineCallback(Callback):
         if pl_module.current_frame_num.item() > self.max_num_frames:
             trainer.should_stop = True
             return
-        
-        #TODO if no init, then set the next pose the same as the previous one
+
+        # TODO if no init, then set the next pose the same as the previous one
 
         pl_module.train_dataset.current_frame = pl_module.current_frame_num.item()
         pl_module.train_dataset.start_frame = pl_module.start_frame.item()
@@ -196,12 +219,18 @@ class StarOnlineCallback(Callback):
     def on_load_checkpoint(self, trainer, pl_module, checkpoint):
         trans_error, rot_error, _, _, rot_error_euler, _ = get_pose_metrics_multi(
             torch.cat(list(pl_module.poses), dim=0),
-            pl_module.train_dataset.gt_relative_poses[:, 1:, ...].transpose(0, 1).to(pl_module.device),
-            reduce=False
+            pl_module.train_dataset.gt_relative_poses[:, 1:, ...]
+            .transpose(0, 1)
+            .to(pl_module.device),
+            reduce=False,
         )
         print(f"trans errors:\n {trans_error}")
         print(f"rot errors:\n {rot_error}")
         print(f"rot errors euler:\n {rot_error_euler}")
+        print(f"loaded start frame: {checkpoint['state_dict']['start_frame']} \n")
+        print(
+            f"loaded current frame: {checkpoint['state_dict']['current_frame_num']} \n"
+        )
 
         # Set num_frames of datasets
         pl_module.train_dataset.current_frame = checkpoint["state_dict"][
@@ -223,21 +252,12 @@ class StarOnlineCallback(Callback):
             "start_frame"
         ].item()
 
-        """
-        self.train_dataset = StarOnlineDataset(
-            self.args,
-            "train",
-            checkpoint["state_dict"]["current_frame_num"].item(),
-            checkpoint["state_dict"]["start_frame"].item(),
-        )
-        self.val_dataset = StarOnlineDataset(
-            self.args,
-            "val",
-            checkpoint["state_dict"]["current_frame_num"].item(),
-            checkpoint["state_dict"]["start_frame"].item(),
-        )
-        self.test_dataset = StarOnlineDataset(
-            self.args, "test", checkpoint["state_dict"]["current_frame_num"].item()
-        )
-        """
-        # TODO need to re-set the dataloaders?
+        # self.ckpt_loaded = True
+
+    """
+    def on_train_start(self, trainer, pl_module):
+        if self.ckpt_loaded:
+            # Reload optimizer and scheduler since we updated start_frame
+            #trainer.strategy.setup(trainer)
+            self.ckpt_loaded = False
+    """

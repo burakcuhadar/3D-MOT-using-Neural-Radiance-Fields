@@ -5,10 +5,9 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from utils import constants
-
 from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
+from utils import constants
 
 from .types__ import NerfNetworkOutput, StarNetworkOutput, StarRenderOutput
 
@@ -267,6 +266,11 @@ def raw2alpha(raw, dists, act_fn=F.relu):
     return 1.0 - torch.exp(-F.softplus(raw) * dists)
 
 
+def sigma2alpha(sigma, dists):
+    # return 1.0 - torch.exp(-act_fn(raw) * dists)
+    return 1.0 - torch.exp(-sigma * dists)
+
+
 @typechecked
 def raw2outputs(
     raw_alpha: TensorType["num_rays", "num_samples"],
@@ -291,7 +295,7 @@ def raw2outputs(
     #     if dists[dists <= 1e-10].shape[0] > 100:
     #         #print("dists has 0: ", dists[dists <= 1e-10].shape[0])
     #         print(z_vals)
-    # #zero_dist_count = dists[dists <= 1e-10].shape[0]
+    # TODO #zero_dist_count = dists[dists <= 1e-10].shape[0]
 
     rgb = torch.sigmoid(raw_rgb)  # [N_rays, N_samples, 3]
     noise = 0.0
@@ -332,7 +336,7 @@ def raw2outputs(
         "depth": depth_map,
         "dists": dists,  # used for sigma loss
         "z_vals": z_vals,  # used for sigma loss
-        #"zero_dist_count": zero_dist_count
+        # TODO #"zero_dist_count": zero_dist_count
     }
 
     # I think in the paper they dont use regularization for appearance init. But it may still be helpful,
@@ -357,28 +361,45 @@ def raw2outputs_star(
 ) -> StarNetworkOutput:
     device = raw_alpha_static.device
 
-    dists = z_vals[..., 1:] - z_vals[..., :-1]
-    # [N_rays,N_samples]
-    dists = torch.cat(
-        [dists, torch.tensor([far_dist], device=device).expand(dists[..., :1].shape)],
-        -1,
-    )
-    dists = dists * torch.norm(rays_d[..., None, :], dim=-1)
+    raw_alpha_sum = raw_alpha_static + raw_alpha_dynamic.sum(dim=1)
+    raw_alpha_sum = raw_alpha_sum.clamp(min=constants.EPS)
+
+    sigma_s = F.softplus(raw_alpha_static)
+    sigma_d = F.softplus(raw_alpha_dynamic)
+    sigma_sum = sigma_s + sigma_d.sum(dim=1)
+    # sigma_sum = torch.where(sigma_sum > 0, sigma_sum, constants.EPS)
+    # sigma_sum += constants.EPS # to prevent division by 0 #TODO also try clamp
+    sigma_sum = sigma_sum.clamp(min=constants.EPS)
 
     rgb_static = torch.sigmoid(raw_rgb_static)  # [N_rays, N_samples, 3]
     rgb_dynamic = torch.sigmoid(raw_rgb_dynamic)  # [N_rays, num_vehicles, N_samples, 3]
 
-    noise = 0.0
-    if raw_noise_std > 0.0:
-        noise = torch.randn(raw_alpha_static.shape) * raw_noise_std
-
-    alpha_static = raw2alpha(raw_alpha_static + noise, dists)  # [N_rays, N_samples]
-    alpha_dynamic = raw2alpha(
-        raw_alpha_dynamic + noise, dists[:, None, :]
-    )  # [N_rays, num_vehicles, N_samples]
-    alpha_total = raw2alpha(
-        raw_alpha_static + noise + raw_alpha_dynamic.sum(dim=1) + noise, dists
+    dists = z_vals[..., 1:] - z_vals[..., :-1]
+    # [N_rays,N_samples]
+    dists_s = torch.cat(
+        [dists, torch.tensor([far_dist], device=device).expand(dists[..., :1].shape)],
+        -1,
     )
+    dists_d = torch.cat(
+        [
+            dists,
+            torch.tensor([constants.EPS], device=device).expand(dists[..., :1].shape),
+        ],
+        -1,
+    )
+
+    dists_s = dists_s * torch.norm(rays_d[..., None, :], dim=-1)
+    dists_d = dists_d * torch.norm(rays_d[..., None, :], dim=-1)
+
+    alpha_static = sigma2alpha(sigma_s, dists_s)  # [N_rays, N_samples]
+    alpha_dynamic = sigma2alpha(
+        sigma_d, dists_d[:, None, :]
+    )  # [N_rays, num_vehicles, N_samples]
+
+    # alpha_total = raw2alpha(
+    #     raw_alpha_static + noise + raw_alpha_dynamic.sum(dim=1) + noise, dists
+    # )
+    alpha_total = 1.0 - torch.exp(-(sigma_s * dists_s + sigma_d.sum(dim=1) * dists_d))
 
     T_s = torch.cumprod(
         torch.cat(
@@ -414,32 +435,118 @@ def raw2outputs_star(
         ),
         -1,
     )[:, :-1]
-    # T = T_s * torch.prod(T_d, dim=1) # which one?
+    # T = T_s * torch.prod(T_d, dim=1) #TODO which one?
 
-    rgb_map = torch.sum(
-        T[..., None]
-        * (
-            alpha_static[..., None] * rgb_static
-            + torch.sum(alpha_dynamic[..., None] * rgb_dynamic, dim=1)
-        ),
-        dim=-2,
+    # weights_d = alpha_dynamic * T[:, None, :] #d2nerf
+    weights_d = T_d * alpha_dynamic
+    # weights_s = alpha_static * T #d2nerf
+    weights_s = T_s * alpha_static
+    weights = (weights_d.sum(dim=1) + weights_s).clamp(min=constants.EPS)
+    acc = weights.sum(dim=-1)
+
+    # d2nerf
+    # rgb_map = (
+    #     (weights_d[..., None] * rgb_dynamic).sum(dim=1)
+    #     + weights_s[..., None] * rgb_static
+    # ).sum(dim=-2)
+
+    # weighted_rgb = (
+    #     sigma_s[..., None] * rgb_static
+    #     + torch.sum(sigma_d[..., None] * rgb_dynamic, dim=1)
+    # ) / sigma_sum[..., None]
+
+    weighted_rgb = torch.sigmoid(
+        (
+            raw_alpha_static[..., None] * raw_rgb_static
+            + torch.sum(raw_alpha_dynamic[..., None] * raw_rgb_dynamic, dim=1)
+        )
+        / raw_alpha_sum[..., None]
     )
-
-    # raw_alpha_sum = raw_alpha_static + raw_alpha_dynamic.sum(dim=1)
-    # raw_alpha_sum = torch.where(raw_alpha_sum > 0, raw_alpha_sum, 1e-10)
 
     # weighted_rgb = torch.sigmoid(
     #     (
-    #         raw_alpha_static[..., None] * raw_rgb_static
-    #         + torch.sum(raw_alpha_dynamic[..., None] * raw_rgb_dynamic, dim=1)
+    #         alpha_static[..., None] * rgb_static
+    #         + torch.sum(alpha_dynamic[..., None] * rgb_dynamic, dim=1)
     #     )
-    #     / raw_alpha_sum[..., None]
+    #     / (alpha_total[..., None] + 1e-10)
     # )
 
-    # rgb_map = torch.sum(
-    #     T[..., None] * alpha_total[..., None] * weighted_rgb,
+    if torch.any(torch.isnan(weighted_rgb)):
+        print("weighted rgb has nan")
+        if torch.any(torch.isnan(sigma_sum)):
+            print("sigma sum has nan")
+        if torch.any(sigma_sum <= 0):
+            print("sigma sum has 0")
+        if torch.any(torch.isnan(sigma_s)):
+            print("sigma s has nan")
+        if torch.any(torch.isnan(sigma_d)):
+            print("sigma d has nan")
+        if torch.any(torch.isnan(rgb_static)):
+            print("rgb static has nan")
+        if torch.any(torch.isnan(rgb_dynamic)):
+            print("rgb dynamic has nan")
+
+        raise ValueError
+
+    rgb_map = torch.sum(
+        T[..., None] * alpha_total[..., None] * weighted_rgb,
+        dim=-2,
+    )
+
+    depth_map = (weights * z_vals).sum(dim=-1)
+
+    if white_bkgd:
+        rgb_map = rgb_map + (1.0 - acc[..., None])
+
+    acc_map = (weights_d.sum(dim=1) + weights_s)[..., :-1].sum(dim=-1)
+
+    ######## Only for visualization
+    rgb_map_static = torch.sum(weights_s[..., None] * rgb_static, dim=-2)
+
+    # [N_rays, num_vehicles, N_samples, 3]
+    rgb_map_dynamic = torch.sum(
+        weights_d[..., None] * rgb_dynamic, dim=-2
+    )  # N_rays, num_vehicles, 3
+    # rgb_map_dynamic = torch.sum(
+    #     weights_d[..., None]
+    #     * torch.sigmoid(sigma_d[..., None] * raw_rgb_dynamic / sigma_sum[:, None, :, None]),
     #     dim=-2,
     # )
+
+    depth_static = torch.sum(weights_s * z_vals, -1)
+    depth_dynamic = torch.sum(
+        weights_d * z_vals[:, None, :], -1
+    )  # N_rays, num_vehicles
+
+    weights_sum = torch.sum(weights, -1)
+    weights_sum = torch.where(
+        weights_sum > 0, weights_sum, torch.finfo(torch.float32).eps
+    )
+    disp_map = 1.0 / torch.max(
+        1e-10 * torch.ones_like(depth_map), depth_map / weights_sum
+    )
+
+    ###### star way
+    # rgb_map = torch.sum(
+    #     T[..., None]
+    #     * (
+    #         alpha_static[..., None] * rgb_static
+    #         + torch.sum(alpha_dynamic[..., None] * rgb_dynamic, dim=1)
+    #     ),
+    #     dim=-2,
+    # )
+
+    """ ###### normalized way
+    # TODO also try with weighting rgb_static and rgb_dynamic
+    weighted_rgb = torch.sigmoid((
+        sigma_s[..., None] * raw_rgb_static
+        + torch.sum(sigma_d[..., None] * raw_rgb_dynamic, dim=1)
+    ) / sigma_sum[..., None])
+
+    rgb_map = torch.sum(
+        T[..., None] * alpha_total[..., None] * weighted_rgb,
+        dim=-2,
+    )
 
     # Only for visualization
     rgb_map_static = torch.sum(
@@ -448,16 +555,11 @@ def raw2outputs_star(
 
     rgb_map_dynamic = torch.sum(
         T_d[..., None] * alpha_dynamic[..., None] * rgb_dynamic, dim=-2
-    )  # N_rays, num_vehicles, 3
+    )  # num_vehicles, N_rays, 3
     dynamic_weights = T_d * alpha_dynamic  # N_rays, num_vehicles, N_samples
     depth_dynamic = torch.sum(
         dynamic_weights * z_vals[:, None, :], -1
     )  # N_rays, num_vehicles
-    # rgb_map_dynamic = torch.where(
-    #     depth_dynamic[..., None] < 0.69,  # todo: get constant from args.
-    #     rgb_map_dynamic,
-    #     torch.zeros_like(rgb_map_dynamic),
-    # )
 
     static_weights = T_s * alpha_static
     depth_static = torch.sum(static_weights * z_vals, -1)
@@ -476,43 +578,58 @@ def raw2outputs_star(
         1e-10 * torch.ones_like(depth_map), depth_map / weights_sum
     )
     acc_map = torch.sum(weights, -1)
-    acc_map_dynamic = torch.sum(dynamic_weights, -1)
 
     if white_bkgd:
         rgb_map = rgb_map + (1.0 - acc_map[..., None])
-
-    sigma_s = F.softplus(raw_alpha_static)
-    sigma_d = F.softplus(raw_alpha_dynamic)
-    sigma_sum = sigma_s + sigma_d.sum(dim=1)
+    """
 
     # entropy = compute_entropy(alpha_static, alpha_dynamic)
     loss_alpha_entropy = compute_alpha_entropy(alpha_static, alpha_dynamic)
     loss_dynamic_vs_static_reg = compute_dynamic_vs_static_reg(
         sigma_s, sigma_d, sigma_sum, alpha_static, alpha_dynamic
     )
-
     loss_ray_reg = compute_ray_reg(sigma_d, sigma_sum)
     loss_static_reg = compute_static_reg(sigma_s, alpha_static)
-    loss_dynamic_reg = compute_dynamic_reg(sigma_d, alpha_dynamic)
 
-    # print("max sigma sum", torch.sum(sigma_d, dim=-1).max())
-    # print("min sigma sum", torch.sum(sigma_d, dim=-1).min())
-    # print("max acc dyna sum", acc_map_dynamic.max())
-    # print("min acc dyna sum", acc_map_dynamic.min())
-    # print("max alpha sum", alpha_dynamic.sum(dim=-1).max())
-    # print("min alpha sum", alpha_dynamic.sum(dim=-1).min())
-    # print("min T_d", T_d.min())
-    # print("max T_d", T_d.max())
-    # print("min T_d[-1]", T_d[:, -1].min())
-    # print("max T_d[-1]", T_d[:, -1].max())
-    # print("min T_s", T_s.min())
-    # print("max T_s", T_s.max())
-    # print("min T_s[-1]", T_s[:, -1].min())
-    # print("max T_s[-1]", T_s[:, -1].max())
-    # print("min T", T.min())
-    # print("max T", T.max())
-    # print("min T[-1]", T[:, -1].min())
-    # print("max T[-1]", T[:, -1].max())
+    # print("rgb map shape:", rgb_map.shape)
+    # print("disp map shape:", disp_map.shape)
+    # print("acc map shape:", acc_map.shape)
+    # print("weights shape:", weights.shape)
+    # print("depth map shape:", depth_map.shape)
+    # print("rgb map static shape:", rgb_map_static.shape)
+    # print("rgb map dynamic shape:", rgb_map_dynamic.shape)
+    # print("depth static shape:", depth_static.shape)
+    # print("depth dynamic shape:", depth_dynamic.shape)
+    # # print("entropy shape:", entropy.shape)
+    # print("dists shape:", dists_s.shape)
+
+    if torch.any(torch.isnan(rgb_map)):
+        print("rgb map has nan")
+        raise ValueError
+    if torch.any(torch.isnan(disp_map)):
+        print("disp map has nan")
+        raise ValueError
+    if torch.any(torch.isnan(acc_map)):
+        print("acc map has nan")
+        raise ValueError
+    if torch.any(torch.isnan(weights)):
+        print("weights has nan")
+        raise ValueError
+    if torch.any(torch.isnan(depth_map)):
+        print("depth map has nan")
+        raise ValueError
+    if torch.any(torch.isnan(rgb_map_static)):
+        print("rgb map static has nan")
+        raise ValueError
+    if torch.any(torch.isnan(rgb_map_dynamic)):
+        print("rgb map dynamic has nan")
+        raise ValueError
+    if torch.any(torch.isnan(depth_static)):
+        print("depth static has nan")
+        raise ValueError
+    if torch.any(torch.isnan(depth_dynamic)):
+        print("depth dynamic has nan")
+        raise ValueError
 
     return {
         "rgb": rgb_map,
@@ -524,22 +641,20 @@ def raw2outputs_star(
         "rgb_dynamic": rgb_map_dynamic,
         "depth_static": depth_static,
         "depth_dynamic": depth_dynamic,
-        "dynamic_transmittance": T_d[:, :, -1],
         # "entropy": entropy,
-        
+        "dists": dists_s,  # used for sigma loss #TODO remove
+        "z_vals": z_vals,  # used for sigma loss #TODO remove
         # Regularization terms
         "loss_alpha_entropy": loss_alpha_entropy,
         "loss_dynamic_vs_static_reg": loss_dynamic_vs_static_reg,
         "loss_ray_reg": loss_ray_reg,
         "loss_static_reg": loss_static_reg,
-        "loss_dynamic_reg": loss_dynamic_reg,
     }
 
 
 def compute_entropy(alpha_static, alpha_dynamic):
-    eps = torch.finfo(alpha_static.dtype).eps
-    alpha_static_clamp = alpha_static.clamp(min=eps, max=1 - eps)
-    alpha_dynamic_clamp = alpha_dynamic.clamp(min=eps, max=1 - eps)
+    alpha_static_clamp = alpha_static.clamp(min=constants.EPS, max=1 - constants.EPS)
+    alpha_dynamic_clamp = alpha_dynamic.clamp(min=constants.EPS, max=1 - constants.EPS)
 
     entropy = -torch.mean(
         alpha_static * torch.log(alpha_static_clamp)
@@ -553,10 +668,12 @@ def compute_entropy(alpha_static, alpha_dynamic):
     ).sum()
 
     total_alpha = alpha_static + alpha_dynamic.sum(dim=1)  # N_rays, N_samples
-    static_normed_trans = alpha_static / total_alpha.clamp(min=eps)
-    static_normed_trans_clamp = static_normed_trans.clamp(min=eps)
-    dynamic_normed_trans = alpha_dynamic / total_alpha.clamp(min=eps)[:, None, :]
-    dynamic_normed_trans_clamp = dynamic_normed_trans.clamp(min=eps)
+    static_normed_trans = alpha_static / total_alpha.clamp(min=constants.EPS)
+    static_normed_trans_clamp = static_normed_trans.clamp(min=constants.EPS)
+    dynamic_normed_trans = (
+        alpha_dynamic / total_alpha.clamp(min=constants.EPS)[:, None, :]
+    )
+    dynamic_normed_trans_clamp = dynamic_normed_trans.clamp(min=constants.EPS)
 
     entropy += -torch.mean(
         total_alpha
@@ -592,7 +709,7 @@ def compute_alpha_entropy(alpha_s, alpha_d):
 
 
 def compute_dynamic_vs_static_reg(sigma_s, sigma_d, total_sigma, alpha_s, alpha_d):
-    num_vehicles = alpha_d.shape[1]
+    num_vehicles = sigma_d.shape[1]
 
     # Dynamic vs Static Regularization from Star
     total_alpha = alpha_s + alpha_d.sum(dim=1)  # N_rays, N_samples
@@ -611,22 +728,28 @@ def compute_dynamic_vs_static_reg(sigma_s, sigma_d, total_sigma, alpha_s, alpha_
     )
 
     ########### Dynamic vs Static Regularization from D2Nerf
-    # normed_sigma_s = sigma_s / total_sigma.clamp(min=eps)
-    # normed_sigma_s = F.sigmoid(normed_sigma_s).clamp(min=constants.EPS, max=1 - constants.EPS)
-    # loss = -torch.mean(
-    #     normed_sigma_s * torch.log(normed_sigma_s)
-    #     + (1 - normed_sigma_s) * torch.log1p(-normed_sigma_s)
-    # ) / (num_vehicles + 1)
+    # # normed_sigma_s = sigma_s / total_sigma.clamp(min=eps)
+    # # normed_sigma_s = F.sigmoid(normed_sigma_s).clamp(min=constants.EPS, max=1 - constants.EPS)
+    # # loss = -torch.mean(
+    # #     normed_sigma_s * torch.log(normed_sigma_s)
+    # #     + (1 - normed_sigma_s) * torch.log1p(-normed_sigma_s)
+    # # ) / (num_vehicles + 1)
 
-    # normed_sigma_d = sigma_d / total_sigma.clamp(min=constants.EPS)[:, None, :]
+    # normed_sigma_d = sigma_d / total_sigma.clamp(min=eps)[:, None, :]
     # normed_sigma_d = F.sigmoid(normed_sigma_d)
-    # skewness = 1.75
-    # normed_sigma_d = torch.clamp(
-    #     normed_sigma_d**skewness, min=constants.EPS, max=1 - constants.EPS
-    # )
-    # rev_normed_sigma_d = torch.clamp(1 - normed_sigma_d, min=constants.EPS)
+    # skewness = 1.0
+    # normed_sigma_d = torch.clamp(normed_sigma_d**skewness, min=constants.EPS, max=1 - constants.EPS)
+    # rev_normed_sigma_d = torch.clamp(1-normed_sigma_d, min=eps)
 
-    # # [N_rays, num_vehicles, N_samples]
+    # [N_rays, num_vehicles, N_samples]
+    # """loss = (
+    #     -torch.mean(
+    #         normed_sigma_d * torch.log(normed_sigma_d)
+    #         + (1 - normed_sigma_d) * torch.log1p(-normed_sigma_d),
+    #         (0, 2),
+    #     ).sum()
+    #     / num_vehicles
+    # )"""
     # loss = (
     #     -torch.mean(
     #         normed_sigma_d * torch.log(normed_sigma_d)
@@ -666,21 +789,6 @@ def compute_static_reg(sigma_s, alpha_s):
 
     return loss
 
-"""emer-nerf way"""
-# def compute_dynamic_reg(sigma_d):
-#     return sigma_d.mean()
-
-#"num_rays", "num_vehicles", "num_samples"
-def compute_dynamic_reg(sigma_d, alpha_d):
-    alpha_dynamic_clamp = alpha_d.clamp(min=constants.EPS, max=1 - constants.EPS)
-
-    mask_thresold = 0.1
-    sigma_d_sum = torch.sum(sigma_d, dim=-1, keepdims=True) # n_rays, n_vehicles, 1
-    mask = torch.where(sigma_d_sum < mask_thresold, 0.0, 1.0) # n_rays, n_vehicles, 1
-    p = alpha_dynamic_clamp / torch.sum(alpha_dynamic_clamp, dim=-1, keepdims=True) # n_rays, n_vehicles, n_samples
-    loss = torch.mean(mask * -torch.mean(p * torch.log(p), dim=-1, keepdims=True))
-
-    return loss
 
 # Hierarchical sampling (section 5.2)
 '''

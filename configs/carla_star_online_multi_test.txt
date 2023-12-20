@@ -1,0 +1,109 @@
+test=True
+expname = lightning_online_two_vehicle_test
+code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
+basedir = ./logs
+
+# two blue tesla
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_two_blue_tesla
+#num_frames = 15
+
+# yellow van blue tesla
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
+#num_frames = 15
+
+# chevro tesla
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla
+#num_frames = 16
+
+# chevro tesla2
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
+num_frames = 14
+
+has_depth_data = True
+num_vehicles = 2
+
+
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/nh0qyl6d/epoch=43.ckpt
+
+# two_vehicle_test_poses
+#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/wcy5lak4/epoch=43.ckpt
+
+# chevro tesla 
+#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/637fl9v7/epoch=40.ckpt
+
+#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/8qiavkzy/epoch=209.ckpt
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/qvqsscow/epoch=259.ckpt
+
+car_sample_ratio = 0
+
+load_gt_poses = False
+noisy_pose_init = True
+
+# depth_loss = True
+# depth_lambda = 0.01
+far_dist = 1e10
+
+lambda_alpha_entropy=1e-3
+lambda_dynamic_vs_static_reg=1e-3
+#lambda_ray_reg=1e-5
+lambda_static_reg=1e-5
+lambda_dynamic_reg=1e-5
+
+
+accumulate_grad_batches = 50
+
+lrate = 5e-4
+lrate_static = 5e-4
+lrate_dynamic = 5e-4
+lrate_decay_steps = [80]
+lrate_decay_rate = 0.5
+
+lrate_pose = 5e-4
+pose_lrate_decay_steps = [1000000]
+pose_lrate_decay_rate = 0.5
+
+netdepth = 8
+netdepth_fine = 8
+netwidth = 256
+netwidth_fine = 256
+
+chunk = 8192
+netchunk = 16384
+
+scale_factor = 0.01
+
+N_samples = 256
+N_importance = 256
+
+
+# N_rand = 1200
+# mixed_precision = True
+N_rand = 1000
+mixed_precision = False
+
+
+num_workers = 4
+
+epochs_online = 10000
+#TODO eliminate epoch_print?
+epoch_print = 1
+epoch_val = 10
+
+#no_batching = True
+#epochs_appearance = 5000
+#epochs_online = 50000
+#epoch_ckpt = 50
+#epoch_print = 1
+#epoch_val = 25
+
+
+online_thres = 1e-3
+initial_num_frames = 5
+end_barf = -1
+
+
+#TODO these are needed?
+no_test_set = True
+save_video_frames = True
+
+use_viewdirs = True

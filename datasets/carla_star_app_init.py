@@ -6,7 +6,7 @@ import imageio
 
 
 from torch.utils.data import Dataset
-from models.rendering import get_rays, get_rays_np
+from models.rendering__ import get_rays, get_rays_np
 from utils.dataset import load_intrinsics, natural_keys, from_ue4_to_nerf
 
 

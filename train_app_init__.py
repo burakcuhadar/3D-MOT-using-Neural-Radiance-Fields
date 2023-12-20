@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
-from utils.logging import log_val_table_app_init
+from utils.logging__ import log_val_table_app_init
 from torch.utils.data import DataLoader
 from models.star__ import STaR
 from torch import inf
@@ -101,7 +101,6 @@ class StarAppInit(pl.LightningModule):
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/psnr", psnr, on_step=False, on_epoch=True)
         self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
-        #TODO # self.log("train/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
 
         if self.args.depth_loss:
             self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
@@ -128,7 +127,6 @@ class StarAppInit(pl.LightningModule):
 
         self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/psnr", psnr, on_step=False, on_epoch=True)
-        #TODO #self.log("val/zero dist count", result["zero_dist_count"], on_step=False, on_epoch=True)
 
         # Log visualizations for a random view (see dataset implementation)
         val_H = self.val_dataset.H
@@ -152,7 +150,6 @@ class StarAppInit(pl.LightningModule):
             torch.reshape(batch["target"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "target",
         )
-        #target_depth = visualize_depth(batch["target_depth"]).reshape((val_H, val_W, 3))
 
         log_val_table_app_init(
             self.logger,

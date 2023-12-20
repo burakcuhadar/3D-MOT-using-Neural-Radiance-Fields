@@ -33,6 +33,9 @@ def natural_keys(text):
     """
     return [atoi(c) for c in re.split(r"(\d+)", text)]
 
+def from_ue4_to_nerf_pts(pts):
+    change_ue4_to_nerf = np.array([[0, 1, 0], [0, 0, 1], [-1, 0, 0]], dtype=np.float32)
+    return np.einsum('ij,nj->ni', change_ue4_to_nerf, pts)
 
 def from_ue4_to_nerf(pose):
     change_ue4_to_nerf = np.array([[0, 1, 0], [0, 0, 1], [-1, 0, 0]], dtype=np.float32)
@@ -51,9 +54,15 @@ def from_ue4_to_nerf(pose):
 
 
 def invert_transformation(t):
-    t_inv = np.eye(4, dtype=np.float32)
-    t_inv[:3, :3] = t[:3, :3].T
-    t_inv[:3, -1] = -t[:3, :3].T @ t[:3, -1]
+    if len(t.shape) == 2:
+        t_inv = np.eye(4, dtype=np.float32)
+        t_inv[:3, :3] = t[:3, :3].T
+        t_inv[:3, -1] = -t[:3, :3].T @ t[:3, -1]
+    elif len(t.shape) == 3:
+        t_inv = np.eye(4, dtype=np.float32)[None, ...].repeat(t.shape[0], axis=0)
+        t_inv[:, :3, :3] = t[:, :3, :3].transpose(0, 2, 1)
+        #t_inv[:, :3, 3] = -t_inv[:, :3, :3] @ t[:, :3, 3]
+        t_inv[:, :3, 3] = -np.einsum('ijk,ik->ij', t_inv[:, :3, :3], t[:, :3, 3])
     return t_inv
 
 @torch.no_grad()

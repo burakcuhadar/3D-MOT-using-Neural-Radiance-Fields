@@ -13,20 +13,22 @@ from typing import Tuple, Optional, Union, TypeAlias
 
 from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
+
 patch_typeguard()
 
 RawNerfOutput: TypeAlias = Tuple[
-    TensorType["num_rays", "num_samples"], #raw_alpha
-    TensorType["num_rays", "num_samples", 3] #raw_rgb
+    TensorType["num_rays", "num_samples"],  # raw_alpha
+    TensorType["num_rays", "num_samples", 3],  # raw_rgb
 ]
 
 NerfOutput: TypeAlias = Tuple[
-    TensorType["num_rays", 3], #rgb
-    TensorType["num_rays"], #disp
-    TensorType["num_rays"], #acc
-    TensorType["num_rays", "num_samples"], #weights
-    TensorType["num_rays"] #depth
+    TensorType["num_rays", 3],  # rgb
+    TensorType["num_rays"],  # disp
+    TensorType["num_rays"],  # acc
+    TensorType["num_rays", "num_samples"],  # weights
+    TensorType["num_rays"],  # depth
 ]
+
 
 # Model
 class NeRF(nn.Module):
@@ -86,21 +88,22 @@ class NeRF(nn.Module):
         self.white_bkgd = args.white_bkgd
 
         # Weight Initialization
-        for layer in self.views_linears:
-            torch.nn.init.kaiming_normal_(layer.weight, nonlinearity="relu")
-            torch.nn.init.zeros_(layer.bias)
-        torch.nn.init.kaiming_normal_(self.alpha_linear.weight, nonlinearity="relu")
-        torch.nn.init.zeros_(self.alpha_linear.bias)
-        torch.nn.init.xavier_uniform_(self.rgb_linear.weight)
+        # for layer in self.views_linears:
+        #     torch.nn.init.kaiming_normal_(layer.weight, nonlinearity="relu")
+        #     torch.nn.init.zeros_(layer.bias)
+        # torch.nn.init.kaiming_normal_(self.alpha_linear.weight, nonlinearity="relu")
+        # torch.nn.init.zeros_(self.alpha_linear.bias)
+        # torch.nn.init.xavier_uniform_(self.rgb_linear.weight)
 
     @typechecked
     def forward(
-        self, 
-        pts: TensorType["num_rays", "num_samples", 3], 
-        viewdirs: TensorType["num_rays", 3], 
-        z_vals: Optional[TensorType["num_rays", "num_samples"]] = None, 
-        rays_d: Optional[TensorType["num_rays", 3]] = None, 
-        step: Optional[int] = None) -> Union[RawNerfOutput, NerfOutput]:
+        self,
+        pts: TensorType["num_rays", "num_samples", 3],
+        viewdirs: TensorType["num_rays", 3],
+        z_vals: Optional[TensorType["num_rays", "num_samples"]] = None,
+        rays_d: Optional[TensorType["num_rays", 3]] = None,
+        step: Optional[int] = None,
+    ) -> Union[RawNerfOutput, NerfOutput]:
         """
         1. Embed the input points and view directions if given
         2. Forward pass embedded inputs through MLP to get rgb and density
@@ -170,8 +173,6 @@ class NeRF(nn.Module):
         return rgb_map, disp_map, acc_map, weights, depth_map
 
 
-
-
 ################################################################################################
 # Nerfacc example model (taken from https://github.com/KAIR-BAIR/nerfacc/tree/master/examples) #
 ################################################################################################
@@ -213,11 +214,7 @@ class MLP(nn.Module):
             self.hidden_layers.append(
                 nn.Linear(in_features, self.net_width, bias=bias_enabled)
             )
-            if (
-                (self.skip_layer is not None)
-                and (i % self.skip_layer == 0)
-                and (i > 0)
-            ):
+            if (self.skip_layer is not None) and (i % self.skip_layer == 0) and (i > 0):
                 in_features = self.net_width + self.input_dim
             else:
                 in_features = self.net_width
@@ -255,16 +252,13 @@ class MLP(nn.Module):
         for i in range(self.net_depth):
             x = self.hidden_layers[i](x)
             x = self.hidden_activation(x)
-            if (
-                (self.skip_layer is not None)
-                and (i % self.skip_layer == 0)
-                and (i > 0)
-            ):
+            if (self.skip_layer is not None) and (i % self.skip_layer == 0) and (i > 0):
                 x = torch.cat([x, inputs], dim=-1)
         if self.output_enabled:
             x = self.output_layer(x)
             x = self.output_activation(x)
         return x
+
 
 class DenseLayer(MLP):
     def __init__(self, input_dim, output_dim, **kwargs):
@@ -330,7 +324,6 @@ class NerfMLP(nn.Module):
         return raw_rgb, raw_sigma
 
 
-
 class SinusoidalEncoder(nn.Module):
     """Sinusoidal Positional Encoder used in Nerf."""
 
@@ -346,9 +339,7 @@ class SinusoidalEncoder(nn.Module):
 
     @property
     def latent_dim(self) -> int:
-        return (
-            int(self.use_identity) + (self.max_deg - self.min_deg) * 2
-        ) * self.x_dim
+        return (int(self.use_identity) + (self.max_deg - self.min_deg) * 2) * self.x_dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -367,7 +358,6 @@ class SinusoidalEncoder(nn.Module):
         if self.use_identity:
             latent = torch.cat([x] + [latent], dim=-1)
         return latent
-
 
 
 class VanillaNeRFRadianceField(nn.Module):
@@ -410,6 +400,3 @@ class VanillaNeRFRadianceField(nn.Module):
             condition = self.view_encoder(condition)
         rgb, sigma = self.mlp(x, condition=condition)
         return torch.sigmoid(rgb), F.relu(sigma)
-
-
-

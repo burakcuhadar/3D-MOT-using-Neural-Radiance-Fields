@@ -1,11 +1,20 @@
 expname = lightning_appinit
 basedir = ./logs
+
 #datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_two_blue_tesla
+#num_frames = 15
+
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla
+#num_frames = 16
+
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
+num_frames = 14
+
 code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
 
 has_depth_data = True
-num_frames = 15
 num_vehicles = 2
 
 #depth_loss = True
@@ -15,7 +24,6 @@ num_vehicles = 2
 far_dist = 1e10
 
 num_workers = 4
-
 
 netdepth = 8
 netdepth_fine = 8

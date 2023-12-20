@@ -4,6 +4,9 @@ import random
 import numpy as np
 from collections import OrderedDict
 import logging
+import pprint
+
+pprint = pprint.PrettyPrinter()
 
 
 def configure_logger(dirpath, filename):
@@ -31,13 +34,23 @@ def copy_config_save_args(basedir, expname, args):
 def load_star_network_from_ckpt(ckpt_path, star_network):
     ckpt = torch.load(ckpt_path)
     state_dict = OrderedDict()
+    pprint.pprint("ckpt keys:")
+    pprint.pprint(ckpt["state_dict"].keys())
+    print("len ckpt keys:", len(ckpt["state_dict"].keys()))
+
     for key in ckpt["state_dict"]:
         if key.startswith("star_network") and ("dynamic" not in key):
             state_dict[key.split("star_network", 1)[1][1:]] = ckpt["state_dict"][key]
 
-    missing_keys, unexpected_keys = star_network.load_state_dict(state_dict, strict=False)
-    print(f"missing keys: {missing_keys}")
+    missing_keys, unexpected_keys = star_network.load_state_dict(
+        state_dict, strict=False
+    )
+    print("missing keys;")
+    pprint.pprint(missing_keys)
+    print(f"len missing keys: {len(missing_keys)}")
     print(f"unexpected keys: {unexpected_keys}")
+    print(f"len unexpected keys: {len(unexpected_keys)}")
+
 
 def config_parser():
     import configargparse
@@ -46,6 +59,11 @@ def config_parser():
     parser.add_argument("--job_id", help="slurm job id")
     parser.add_argument("--config", is_config_file=True, help="config file path")
     parser.add_argument("--expname", type=str, help="experiment name")
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="testing or training",
+    )
     parser.add_argument(
         "--basedir", type=str, default="./logs/", help="where to store ckpts and logs"
     )
@@ -267,7 +285,7 @@ def config_parser():
     parser.add_argument(
         "--code_dir",
         type=str,
-        default=".",   
+        default=".",
         help="directory of the code to be logged on wandb",
     )
 
@@ -416,8 +434,59 @@ def config_parser():
     parser.add_argument("--grid_resolution", type=int, default=128)
     parser.add_argument("--grid_nlvl", type=int, default=1)
     parser.add_argument("--render_step_size", type=float, default=5e-3)
-    parser.add_argument("--target_sample_batch_size", type=int, default=(1<<16))
+    parser.add_argument("--target_sample_batch_size", type=int, default=(1 << 16))
 
+    parser.add_argument(
+        "--lambda_alpha_entropy",
+        type=float,
+        default=0,
+        help="alpha entropy lambda used for loss",
+    )
+    parser.add_argument(
+        "--lambda_dynamic_vs_static_reg",
+        type=float,
+        default=0,
+        help="dynamic vs static lambda used for loss",
+    )
+    parser.add_argument(
+        "--lambda_ray_reg", type=float, default=0, help="ray reg lambda used for loss"
+    )
+    parser.add_argument(
+        "--lambda_static_reg",
+        type=float,
+        default=0,
+        help="static reg lambda used for loss",
+    )
+    parser.add_argument(
+        "--lambda_dynamic_reg",
+        type=float,
+        default=0,
+        help="dynamic reg lambda used for loss",
+    )
+    parser.add_argument(
+        "--epoch_start_dynamic_reg",
+        type=int,
+        default=0,
+        help="epoch to start applying dynamic reg",
+    )
+
+    parser.add_argument(
+        "--bbox_view",
+        type=int,
+        default=0,
+        help="view to compute 3d iou for and visualize it",
+    )
+    parser.add_argument(
+        "--has_bbox",
+        action="store_true",
+        help="whether the dataset contains bounding box annotations",
+    )
+    parser.add_argument(
+        "--eval_last_frame",
+        type=int,
+        default=-1,
+        help="the last frame to be evaluated",
+    )
 
     return parser
 

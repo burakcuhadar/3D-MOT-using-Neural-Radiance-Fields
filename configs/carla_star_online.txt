@@ -1,7 +1,6 @@
 expname = lightning_online
 code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
 basedir = ./logs
-#datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
 datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_with_test_poses
 has_depth_data = True
 num_frames = 16
@@ -11,37 +10,44 @@ num_vehicles = 1
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/hf3eovzu/epoch=44.ckpt
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/pmf8wmzk/epoch=44.ckpt
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mj4z8phs/epoch=40.ckpt
-appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/bbhxixo1/epoch=40.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/bbhxixo1/epoch=40.ckpt
 
 # with depth supervision (depth loss, without masking)
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/mnj18chc/epoch=70.ckpt
 
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/9bo0rndb/epoch=283.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/9cc9h7sw/epoch=164.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/8x1rn9d4/epoch=59.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/vd1bcgtq/epoch=129.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/t2dhxslx/epoch=439.ckpt
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/et2mf2vj/epoch=709.ckpt
-
-# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/20mw7pl9/epoch=39.ckpt
-# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/ninw6gqn/epoch=29.ckpt
-# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/z41u3oed/epoch=99.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/9bo0rndb/epoch=283.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/9cc9h7sw/epoch=164.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/8x1rn9d4/epoch=59.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/vd1bcgtq/epoch=129.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/t2dhxslx/epoch=439.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/et2mf2vj/epoch=709.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/2r9i2v3n/epoch=34.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/chw4gcy5/epoch=14.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/wzot7nap/epoch=29.ckpt
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/1pjt6fdx/epoch=314.ckpt
 
 car_sample_ratio = 0
 
-load_gt_poses = True
-noisy_pose_init = False
+load_gt_poses = False
+noisy_pose_init = True
 
 # depth_loss = True
 # depth_lambda = 0.01
 far_dist = 1e10
 
+lambda_alpha_entropy=1e-3
+lambda_dynamic_vs_static_reg=1e-3
+#lambda_ray_reg=1e-5
+lambda_static_reg=1e-5
+lambda_dynamic_reg=1e-4
+#epoch_start_dynamic_reg = 30
 
-accumulate_grad_batches = 1
+accumulate_grad_batches = 50
 
 lrate = 5e-4
 lrate_static = 5e-4
 lrate_dynamic = 5e-4
+#lrate_dynamic = 1e-3
 lrate_decay_steps = [80]
 lrate_decay_rate = 0.5
 
@@ -65,7 +71,8 @@ N_importance = 256
 
 #N_rand = 1200
 #mixed_precision = True
-N_rand = 800
+#N_rand = 750
+N_rand = 1400
 mixed_precision = False
 
 
@@ -83,10 +90,8 @@ epoch_val = 5
 #epoch_print = 1
 #epoch_val = 25
 
-
 online_thres = 1e-3
 initial_num_frames = 5
-entropy_weight = 1e-3
 end_barf = -1
 
 
