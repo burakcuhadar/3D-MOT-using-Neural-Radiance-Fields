@@ -235,6 +235,7 @@ class StarOnlineDataset(Dataset):
             depth_imgs = None
         
         if self.split == "test":
+            print('last eval frame', self.eval_last_frame)
             imgs = imgs[:, : self.eval_last_frame, ...]
             semantic_imgs = semantic_imgs[:, : self.eval_last_frame, ...]
             if args.has_depth_data:
@@ -329,8 +330,6 @@ class StarOnlineDataset(Dataset):
             target = torch.reshape(target, [-1, 3])  # (H*W, 3)
 
         elif self.split == "test":
-            idx = 7  # TODO delete
-            # idx = 7 # for 2d iou
             pose = self.poses[idx, :3, :4]
             cam_pose = pose
             rays_o, rays_d = get_rays(self.H, self.W, self.K, torch.Tensor(pose))
@@ -338,6 +337,7 @@ class StarOnlineDataset(Dataset):
             rays_d = torch.reshape(rays_d, [-1, 3])  # (H*W, 3)
             target = self.imgs[idx, ...]  # [num_frames, H, W, 3]
             target = torch.Tensor(target)
+            print("target shape", target.shape)
             target = torch.reshape(
                 target, [self.eval_last_frame, -1, 3]
             )  # (num_frames, H*W, 3)
@@ -346,7 +346,7 @@ class StarOnlineDataset(Dataset):
             semantic_mask = self.semantic_imgs[idx, ...] == 10  # [frame_num, H, W]
             semantic_mask = torch.Tensor(semantic_mask)
             semantic_mask = torch.reshape(
-                semantic_mask, [self.num_frames, -1]
+                semantic_mask, [self.eval_last_frame, -1]
             )  # [frame_num, H*W]
 
         return {

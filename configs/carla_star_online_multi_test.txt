@@ -18,10 +18,11 @@ basedir = ./logs
 # chevro tesla2
 datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
 num_frames = 14
-
 has_depth_data = True
 num_vehicles = 2
-
+bbox_view = 1
+has_bbox = True
+eval_last_frame = 5
 
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/nh0qyl6d/epoch=43.ckpt
 

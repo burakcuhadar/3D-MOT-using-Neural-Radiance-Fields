@@ -9,8 +9,11 @@ basedir = ./logs
 #datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla
 #num_frames = 16
 
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
-num_frames = 14
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
+#num_frames = 14
+
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla3
+num_frames = 12
 
 code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
 

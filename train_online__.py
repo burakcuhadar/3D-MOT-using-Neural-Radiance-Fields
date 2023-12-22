@@ -620,7 +620,7 @@ class StarOnline(pl.LightningModule):
         self.test_depths_statics.append([])
         self.test_depths_dynamics.append([])
 
-        for i in range(self.args.num_frames):
+        for i in range(self.args.eval_last_frame):
             frame = torch.from_numpy(np.array([i])[:, None]).to(self.device)  # 1,1
             batch["frames"] = frame
 
@@ -658,7 +658,9 @@ class StarOnline(pl.LightningModule):
                     axis=0,
                 ),
                 self.test_dataset.gt_vehicle_poses[:, i].numpy(),
-                self.test_dataset.bbox_local_vertices if batch_idx == self.args.bbox_view else None,
+                self.test_dataset.bbox_local_vertices
+                if batch_idx == self.args.bbox_view
+                else None,
                 self.test_dataset.gt_vehicle_poses[:, 0].numpy(),
             )
 
@@ -670,7 +672,9 @@ class StarOnline(pl.LightningModule):
             self.test_depths_statics[-1].append(test_result["depth_static"])
             self.test_depths_dynamics[-1].append(test_result["depth_dynamics"])
 
-            semantic_mask_count = torch.count(batch["semantic_mask"][i]).cpu().item()
+            semantic_mask_count = (
+                torch.count_nonzero(batch["semantic_mask"][i]).cpu().item()
+            )
             if semantic_mask_count > 0:
                 self.test_iou2d += test_result["iou_2d"]
                 self.test_iou2d_count += 1
@@ -682,7 +686,7 @@ class StarOnline(pl.LightningModule):
                     i,
                     batch_idx,
                 )
-            
+
             if self.args.has_bbox and batch_idx == self.args.bbox_view:
                 self.test_iou3d += test_result["iou_3d"]
                 log_3d_iou(
@@ -734,7 +738,7 @@ class StarOnline(pl.LightningModule):
         self.test_rgb_dynamics = []
         self.test_depths_statics = []
         self.test_depths_dynamics = []
-        
+
         self.test_mse_mean = 0
         self.test_psnr_mean = 0
         self.test_lpips_mean = 0
@@ -758,7 +762,9 @@ class StarOnline(pl.LightningModule):
         self.log("test/iou_2d", iou_2d)
 
         if self.args.has_bbox:
-            iou_3d = self.test_iou3d / (self.args.eval_last_frame - 1) # -1, since for the first frame we use gt pose
+            iou_3d = self.test_iou3d / (
+                self.args.eval_last_frame - 1
+            )  # -1, since for the first frame we use gt pose
             self.log("test/iou_3d", iou_3d)
 
         return  # TODO delete

@@ -11,7 +11,7 @@ def test_step_for_one_frame(
     frame,
     batch,
     batch_idx,
-    result,
+    test_result,
     num_vehicles,
     estimated_relative_pose=None,
     gt_pose=None,
@@ -23,28 +23,28 @@ def test_step_for_one_frame(
 
     result = {}
 
-    result["target"] = to8b(
+    result["rgb_gt"] = to8b(
         batch["target"][frame].reshape(test_H, test_W, 3).cpu().detach().numpy(),
         "target",
     )
 
     result["rgb0"] = to8b(
-        torch.reshape(result["rgb0"], (test_H, test_W, 3)).cpu().detach().numpy(),
+        torch.reshape(test_result["rgb0"], (test_H, test_W, 3)).cpu().detach().numpy(),
         "rgb0",
     )
 
-    result["depth0"] = visualize_depth(result["depth0"]).reshape((test_H, test_W, 3))
+    result["depth0"] = visualize_depth(test_result["depth0"]).reshape((test_H, test_W, 3))
 
     result["rgb"] = to8b(
-        torch.reshape(result["rgb"], (test_H, test_W, 3)).cpu().detach().numpy(),
+        torch.reshape(test_result["rgb"], (test_H, test_W, 3)).cpu().detach().numpy(),
         "rgb",
     )
 
-    result["depth"] = visualize_depth(result["depth"]).reshape((test_H, test_W, 3))
+    result["depth"] = visualize_depth(test_result["depth"]).reshape((test_H, test_W, 3))
 
     # Visualize static and dynamic nerfs separately
     result["rgb_static0"] = to8b(
-        torch.reshape(result["rgb_static0"], (test_H, test_W, 3))
+        torch.reshape(test_result["rgb_static0"], (test_H, test_W, 3))
         .cpu()
         .detach()
         .numpy(),
@@ -52,7 +52,7 @@ def test_step_for_one_frame(
     )
 
     result["rgb_dynamic0s"] = to8b(
-        result["rgb_dynamic0"]
+        test_result["rgb_dynamic0"]
         .transpose(0, 1)
         .reshape((num_vehicles, test_H, test_W, 3))
         .cpu()
@@ -62,12 +62,12 @@ def test_step_for_one_frame(
     )
 
     result["rgb_static"] = to8b(
-        torch.reshape(result["rgb_static"], (test_H, test_W, 3)).cpu().detach().numpy(),
+        torch.reshape(test_result["rgb_static"], (test_H, test_W, 3)).cpu().detach().numpy(),
         "rgb_static",
     )
 
     result["rgb_dynamics"] = to8b(
-        result["rgb_dynamic"]
+        test_result["rgb_dynamic"]
         .transpose(0, 1)
         .reshape((num_vehicles, test_H, test_W, 3))
         .cpu()
@@ -76,24 +76,24 @@ def test_step_for_one_frame(
         "rgb_dynamics",
     )
 
-    result["depth_static"] = visualize_depth(result["depth_static"]).reshape(
+    result["depth_static"] = visualize_depth(test_result["depth_static"]).reshape(
         (test_H, test_W, 3)
     )
 
     result["depth_dynamics"] = visualize_depth(
-        result["depth_dynamic"].transpose(0, 1), test_H, test_W
+        test_result["depth_dynamic"].transpose(0, 1), test_H, test_W
     )
 
-    result["depth_static0"] = visualize_depth(result["depth_static0"]).reshape(
+    result["depth_static0"] = visualize_depth(test_result["depth_static0"]).reshape(
         (test_H, test_W, 3)
     )
 
     result["depth_dynamic0s"] = visualize_depth(
-        result["depth_dynamic0"].transpose(0, 1), test_H, test_W
+        test_result["depth_dynamic0"].transpose(0, 1), test_H, test_W
     )
 
     result["iou_2d"], result["predicted_masks"] = compute_2d_iou(
-        result["dynamic_transmittance"],
+        test_result["dynamic_transmittance"],
         batch["semantic_mask"][frame],
     )
 

@@ -9,11 +9,11 @@ basedir = ./logs
 #datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_two_blue_tesla
 #num_frames = 15
 
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
-num_frames = 14
-bbox_view = 1
-has_bbox = True
-eval_last_frame = 5
+#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
+#num_frames = 14
+
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla3
+num_frames = 12
 
 has_depth_data = True
 num_vehicles = 2
@@ -30,7 +30,10 @@ num_vehicles = 2
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/637fl9v7/epoch=40.ckpt
 
 # chevro tesla 2
-appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/uivxvaeg/epoch=49.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/uivxvaeg/epoch=49.ckpt
+
+# chevro tesla 3
+appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/k9z7gbf0/epoch=51.ckpt
 
 # online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/zi0faekg/epoch=80.ckpt
 # online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/gsxg1uwx/epoch=29.ckpt
