@@ -113,6 +113,7 @@ def get_pose_metrics(poses, gt_poses, reduce=True):
     )
 
 
+@torch.no_grad()
 def get_pose_metrics_multi(poses, gt_poses, reduce=True):
     assert poses.shape[0] == gt_poses.shape[0]
     assert poses.shape[1] == gt_poses.shape[1]
@@ -458,6 +459,8 @@ def evaluate_ate(star_poses, gt_poses):
 
     return trans_rmse
 
+######################################## end of TUM rpe/ate evaluation #######################################
+
 
 def get_local_vertices(bbox_obj, scale_factor):
     num_vehicles = len(bbox_obj)
@@ -505,6 +508,7 @@ def compute_3d_iou(
     _, iou_3d = box3d_overlap(
         torch.from_numpy(carla_to_p3d_vertices(bboxes)),
         torch.from_numpy(carla_to_p3d_vertices(gt_bboxes)),
+        eps=1e-6,
     )
     ious = iou_3d.numpy().diagonal()
 

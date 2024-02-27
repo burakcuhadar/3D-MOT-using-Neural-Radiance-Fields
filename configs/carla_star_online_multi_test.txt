@@ -4,36 +4,63 @@ code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-usin
 basedir = ./logs
 
 # two blue tesla
-#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_two_blue_tesla
-#num_frames = 15
+# datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_two_blue_tesla
+# num_frames = 15
 
 # yellow van blue tesla
-#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
-#num_frames = 15
+# datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/two_vehicle_test_poses
+# num_frames = 15
 
 # chevro tesla
-#datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla
-#num_frames = 16
+# datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla
+# num_frames = 16
 
 # chevro tesla2
-datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
-num_frames = 14
+# datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla2
+# num_frames = 14
+
+# chevro tesla4
+# datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla4
+# num_frames = 12
+
+# has_depth_data = True
+# num_vehicles = 2
+# bbox_view = 1
+# has_bbox = True
+# eval_last_frame = 8
+
+# one vehicle
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_with_test_poses
+num_frames = 16
+
 has_depth_data = True
-num_vehicles = 2
-bbox_view = 1
-has_bbox = True
-eval_last_frame = 5
+num_vehicles = 1
+has_bbox = False
+eval_last_frame = 9
 
 # appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/nh0qyl6d/epoch=43.ckpt
 
 # two_vehicle_test_poses
-#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/wcy5lak4/epoch=43.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/wcy5lak4/epoch=43.ckpt
 
 # chevro tesla 
-#appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/637fl9v7/epoch=40.ckpt
+# appearance_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/appinit/637fl9v7/epoch=40.ckpt
 
-#online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/8qiavkzy/epoch=209.ckpt
-online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/qvqsscow/epoch=259.ckpt
+
+# ablation:dynamic reg
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/o4eprdme/epoch=739.ckpt
+# ablation: star
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/nows9qwc/epoch=639.ckpt
+# ablation: static reg
+# online_ckpt_path = /home/stud/cuhadar/storage/user/oldcode/repo/sbatch/ckpts/online/z0uuzn5s/epoch=219.ckpt
+# ablation: ray reg
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/2ndhgd3z/epoch=799.ckpt
+
+# one vehicle
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/np8u92z4/epoch=409.ckpt
+
+# two vehicle
+# online_ckpt_path = /home/stud/cuhadar/storage/user/oldcode/repo/sbatch/ckpts/online/5qtbgr62/epoch=259.ckpt
 
 car_sample_ratio = 0
 
@@ -86,8 +113,6 @@ mixed_precision = False
 num_workers = 4
 
 epochs_online = 10000
-#TODO eliminate epoch_print?
-epoch_print = 1
 epoch_val = 10
 
 #no_batching = True
@@ -102,9 +127,5 @@ online_thres = 1e-3
 initial_num_frames = 5
 end_barf = -1
 
-
-#TODO these are needed?
-no_test_set = True
 save_video_frames = True
-
 use_viewdirs = True

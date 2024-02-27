@@ -3,6 +3,7 @@ basedir = ./logs
 datadir = /home/stud/cuhadar/storage/user/3D-MOT-using-Neural-Radiance-Fields/data/carla_dynamic_depth
 has_depth_data = True
 num_frames = 16
+num_vehicles = 1
 
 online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/online/l1avwstm/epoch=65.ckpt
 

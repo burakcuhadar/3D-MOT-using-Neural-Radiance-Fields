@@ -82,7 +82,7 @@ class StarAppInitDataset(Dataset):
 
     def load_imgs_poses(self, args):
         # How many images we have for one frame: rgb, semantic, (depth)
-        img_num_for_one_frame = 2 
+        img_num_for_one_frame = 2
         if args.has_depth_data:
             img_num_for_one_frame = 3
         if self.split == "val":
@@ -109,7 +109,7 @@ class StarAppInitDataset(Dataset):
                 if i < 50 or i > 55:
                     continue
                 # Currently, I skip the problematic val view
-                #if i == len(cameras) - 1:
+                # if i == len(cameras) - 1:
                 #    continue
             elif self.split == "test":
                 if i <= 55:
@@ -198,7 +198,7 @@ class StarAppInitDataset(Dataset):
             target = torch.reshape(target, [-1, 3])  # (H*W, 3)
 
             target_depth = None
-            #if self.has_depth_data:
+            # if self.has_depth_data:
             #    target_depth = self.depth_imgs[idx]
 
         return {

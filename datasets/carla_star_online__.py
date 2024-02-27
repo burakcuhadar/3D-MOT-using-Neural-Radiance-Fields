@@ -43,6 +43,7 @@ class StarOnlineDataset(Dataset):
         self.car_sample_ratio = args.car_sample_ratio
         self.num_vehicles = num_vehicles
         self.eval_last_frame = args.eval_last_frame
+        self.step_num = 1000
 
         self.gt_relative_poses = torch.from_numpy(self.load_gt_relative_poses(args))
         self.gt_vehicle_poses = self.get_gt_vehicle_poses(args)
@@ -107,26 +108,46 @@ class StarOnlineDataset(Dataset):
             rays = np.expand_dims(rays, axis=1).repeat(
                 num_frames, axis=1
             )  # [N,frame_num,2,H,W,3]
+            cropped_rays = rays[
+                :, :, :, 100:300, 100:300, :
+            ]  # TODO use args to do this
+
             rays_o = rays[:, :, 0, :, :, :]  # [N,frame_num,H,W,3]
             rays_d = rays[:, :, 1, :, :, :]  # [N,frame_num,H,W,3]
+            cropped_rays_o = cropped_rays[:, :, 0, :, :, :]
+            cropped_rays_d = cropped_rays[:, :, 1, :, :, :]
 
             # frame_num = rays_o.shape[1]
             rays_o = np.swapaxes(rays_o, 0, 1)  # [frame_num, N,H,W,3]
             rays_d = np.swapaxes(rays_d, 0, 1)  # [frame_num, N,H,W,3]
+            cropped_rays_o = np.swapaxes(cropped_rays_o, 0, 1)
+            cropped_rays_d = np.swapaxes(cropped_rays_d, 0, 1)
+
             rays_o = np.reshape(rays_o, [num_frames, -1, 3])  # [frame_num, N*H*W, 3]
             rays_d = np.reshape(rays_d, [num_frames, -1, 3])  # [frame_num, N*H*W, 3]
+            cropped_rays_o = np.reshape(cropped_rays_o, [num_frames, -1, 3])
+            cropped_rays_d = np.reshape(cropped_rays_d, [num_frames, -1, 3])
 
             imgs = np.swapaxes(self.imgs, 0, 1)
             target_rgbs = np.reshape(
                 imgs, [num_frames, -1, 3]
             )  # [num_frames, N*H*W, 3]
+            cropped_target_rgbs = np.reshape(
+                imgs[:, :, 100:300, 100:300, :], [num_frames, -1, 3]
+            )  # [num_frames, N*H*W, 3]
 
             rays_o = rays_o.astype(np.float32)
             rays_d = rays_d.astype(np.float32)
+            cropped_rays_o = cropped_rays_o.astype(np.float32)
+            cropped_rays_d = cropped_rays_d.astype(np.float32)
 
             self.rays_o = rays_o
             self.rays_d = rays_d
             self.target_rgbs = target_rgbs
+
+            self.cropped_rays_o = cropped_rays_o
+            self.cropped_rays_d = cropped_rays_d
+            self.cropped_target_rgbs = cropped_target_rgbs
 
             print("rays_o", self.rays_o.shape)
             print("rays_d", self.rays_d.shape)
@@ -152,7 +173,16 @@ class StarOnlineDataset(Dataset):
 
             print("semantic rays shape", semantic_rays.shape)
 
-        self.bbox_local_vertices = get_local_vertices(self.bboxes, args.scale_factor) if args.has_bbox else None
+        self.bbox_local_vertices = (
+            get_local_vertices(self.bboxes, args.scale_factor)
+            if args.has_bbox
+            else None
+        )
+
+        if args.precrop_iters > 0 and split != "test":
+            self.crop = True
+        else:
+            self.crop = False
 
     def load_imgs_poses(self, args):
         extrinsics = np.load(
@@ -233,9 +263,9 @@ class StarOnlineDataset(Dataset):
             print("depth imgs shape", depth_imgs.shape)
         else:
             depth_imgs = None
-        
+
         if self.split == "test":
-            print('last eval frame', self.eval_last_frame)
+            print("last eval frame", self.eval_last_frame)
             imgs = imgs[:, : self.eval_last_frame, ...]
             semantic_imgs = semantic_imgs[:, : self.eval_last_frame, ...]
             if args.has_depth_data:
@@ -245,11 +275,11 @@ class StarOnlineDataset(Dataset):
 
     def __len__(self):
         if self.split == "train":
-            return 1000
+            return self.step_num
         elif self.split == "val":
             return 1
         elif self.split == "test":
-            #return 1
+            # return 1
             return self.imgs.shape[0]
         else:
             raise ValueError("invalid dataset split")
@@ -260,7 +290,15 @@ class StarOnlineDataset(Dataset):
         cam_pose = None
 
         if self.split == "train":
-            if self.car_sample_ratio == 0:
+            if self.crop:
+                frame = np.random.randint(low=self.start_frame, high=self.current_frame)
+                frames = np.array([frame])[:, None]  # 1,1
+
+                indices = np.random.choice(self.cropped_rays_o.shape[1], self.N_rand)
+                rays_o = self.cropped_rays_o[frame, indices, ...]
+                rays_d = self.cropped_rays_d[frame, indices, ...]
+                target = self.cropped_target_rgbs[frame, indices, ...]
+            elif self.car_sample_ratio == 0:
                 """No semantic rays"""
                 frame = np.random.randint(low=self.start_frame, high=self.current_frame)
                 frames = np.array([frame])[:, None]  # 1,1
@@ -344,7 +382,8 @@ class StarOnlineDataset(Dataset):
             frames = None
 
             semantic_mask = self.semantic_imgs[idx, ...] == 10  # [frame_num, H, W]
-            semantic_mask = torch.Tensor(semantic_mask)
+            semantic_mask = torch.from_numpy(semantic_mask)
+            print('semantic mask type', semantic_mask.dtype)
             semantic_mask = torch.reshape(
                 semantic_mask, [self.eval_last_frame, -1]
             )  # [frame_num, H*W]
@@ -397,7 +436,7 @@ class StarOnlineDataset(Dataset):
 
             for f in pose_files:
                 poses_ue4[i].append(np.load(f).astype(np.float32))
-                
+
                 posei = from_ue4_to_nerf(np.load(f))
                 if args.scale_factor > 0:
                     posei[:3, 3] *= args.scale_factor
@@ -425,7 +464,7 @@ class StarOnlineDataset(Dataset):
             4,
             4,
         ), "Vehicles poses are not read correctly!"
-        self.poses_ue4 = poses_ue4    
+        self.poses_ue4 = poses_ue4
 
         return poses
 

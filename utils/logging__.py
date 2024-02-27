@@ -15,8 +15,9 @@ def log_val_table_app_init(logger, epoch, rgb, rgb_gt, depth, rgb0, depth0, z_st
         "depth",
         "rgb_coarse",
         "depth_coarse",
-        "z_std",
     ]
+    if z_std is not None:
+        columns += ["z_std"]
     data = [
         [
             epoch,
@@ -25,9 +26,10 @@ def log_val_table_app_init(logger, epoch, rgb, rgb_gt, depth, rgb0, depth0, z_st
             wandb.Image(depth),
             wandb.Image(rgb0),
             wandb.Image(depth0),
-            wandb.Image(z_std),
         ]
     ]
+    if z_std is not None:
+        data[0] += [wandb.Image(z_std)]
     logger.log_table(key="val table", columns=columns, data=data)
 
 

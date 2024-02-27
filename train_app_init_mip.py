@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 from utils.logging__ import log_val_table_app_init
 from torch.utils.data import DataLoader
-from models.star__ import STaR
+from models.star_mipnerf import STaR
 from torch import inf
 
 from pytorch_lightning.loggers import WandbLogger
@@ -42,75 +42,30 @@ class StarAppInit(pl.LightningModule):
         self.star_network = star_network
 
     def forward(self, batch):
-        pts, z_vals = sample_pts(
-            batch["rays_o"],
-            batch["rays_d"],
-            self.train_dataset.near,
-            self.train_dataset.far,
-            self.args.N_samples,
-            self.args.perturb,
-            self.args.lindisp,
-            self.training,
-        )
-
         viewdirs = batch["rays_d"] / torch.norm(
             batch["rays_d"], dim=-1, keepdim=True
         )  # [N_rays, 3]
 
-        return render_star_appinit(
-            self.star_network,
-            pts,
-            viewdirs,
-            z_vals,
+        return self.star_network(
             batch["rays_o"],
-            batch["rays_d"],
-            self.args.N_importance,
+            viewdirs,
         )
 
     def training_step(self, batch, batch_idx):
         result = self(batch)
 
+        img_loss = img2mse(result["rgb"], batch["target"])
+        loss = img_loss
         img_loss0 = img2mse(result["rgb0"], batch["target"])
-        loss = img_loss0
+        loss = loss + 0.1 * img_loss0
 
-        if self.args.N_importance > 0:
-            img_loss = img2mse(result["rgb"], batch["target"])
-            loss = loss + img_loss
-
-        if self.args.depth_loss:
-            depth_loss = compute_depth_loss(
-                result["depth"],
-                batch["target_depth"],
-                self.train_dataset.near,
-                self.train_dataset.far,
-            )
-            loss = loss + self.args.depth_lambda * depth_loss
-        if self.args.sigma_loss:
-            sigma_loss = compute_sigma_loss(
-                result["weights"],
-                result["z_vals"],
-                result["dists"],
-                batch["target_depth"],
-                self.train_dataset.near,
-                self.train_dataset.far,
-            )
-            loss = loss + self.args.sigma_lambda * sigma_loss
-
-        if self.args.N_importance > 0:
-            psnr = mse2psnr(img_loss)
+        psnr = mse2psnr(img_loss)
         psnr0 = mse2psnr(img_loss0)
 
-        if self.args.N_importance > 0:
-            self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True)
-            self.log("train/psnr", psnr, on_step=False, on_epoch=True)
-
+        self.log("train/fine_loss", img_loss, on_step=False, on_epoch=True)
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("train/psnr", psnr, on_step=False, on_epoch=True)
         self.log("train/psnr0", psnr0, on_step=False, on_epoch=True)
-
-        if self.args.depth_loss:
-            self.log("train/depth_loss", depth_loss, on_step=False, on_epoch=True)
-        if self.args.sigma_loss:
-            self.log("train/sigma_loss", sigma_loss, on_step=False, on_epoch=True)
 
         return loss
 
@@ -127,8 +82,7 @@ class StarAppInit(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         result = self(batch)
 
-        val_rgb = result["rgb"] if self.args.N_importance > 0 else result["rgb0"]
-        val_mse = img2mse(val_rgb, batch["target"])
+        val_mse = img2mse(result["rgb"], batch["target"])
         psnr = mse2psnr(val_mse)
 
         self.log("val/mse", val_mse, prog_bar=True, on_step=False, on_epoch=True)
@@ -145,56 +99,28 @@ class StarAppInit(pl.LightningModule):
         depth0 = visualize_depth(result["depth0"], multi_vehicle=False).reshape(
             (val_H, val_W, 3)
         )
+        rgb = to8b(
+            torch.reshape(result["rgb"], (val_H, val_W, 3)).cpu().detach().numpy(),
+            "rgb",
+        )
+        depth = visualize_depth(result["depth"], multi_vehicle=False).reshape(
+            (val_H, val_W, 3)
+        )
         target = to8b(
             torch.reshape(batch["target"], (val_H, val_W, 3)).cpu().detach().numpy(),
             "target",
         )
 
-        if self.args.N_importance > 0:
-            # z_std = to8b(
-            #     torch.reshape(result["z_std"], (val_H, val_W, 1))
-            #     .cpu()
-            #     .detach()
-            #     .numpy(),
-            #     "z_std",
-            # )
-            rgb = to8b(
-                torch.reshape(val_rgb, (val_H, val_W, 3)).cpu().detach().numpy(),
-                "rgb",
-            )
-            depth = visualize_depth(result["depth"], multi_vehicle=False).reshape(
-                (val_H, val_W, 3)
-            )
-
-        self.logger.log_image(
-            "val/imgs",
-            [
-                *(
-                    [
-                        rgb,
-                        depth,
-                    ]
-                    if self.args.N_importance > 0
-                    else []
-                ),
-                target,
-                rgb0,
-                depth0,
-                # z_std,
-            ],
-            step=self.global_step,
+        log_val_table_app_init(
+            self.logger,
+            self.current_epoch,
+            rgb,
+            target,
+            depth,
+            rgb0,
+            depth0,
+            None,
         )
-
-        # log_val_table_app_init(
-        #     self.logger,
-        #     self.current_epoch,
-        #     rgb,
-        #     target,
-        #     depth,
-        #     rgb0,
-        #     depth0,
-        #     z_std,
-        # )
 
     def setup(self, stage):
         self.train_dataset = StarAppInitDataset(self.args, split="train")
@@ -240,7 +166,7 @@ def train():
     )
 
     early_stopping_cb = EarlyStopping(
-        monitor="train/fine_loss" if args.N_importance > 0 else "train/loss",
+        monitor="train/fine_loss",
         mode="min",
         stopping_threshold=args.appearance_init_thres,
     )

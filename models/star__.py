@@ -33,9 +33,10 @@ class STaR(nn.Module):
         self.N_importance = args.N_importance
 
         self.static_coarse_nerf = NeRF(D=args.netdepth, W=args.netwidth, args=args)
-        self.static_fine_nerf = NeRF(
-            D=args.netdepth_fine, W=args.netwidth_fine, args=args
-        )
+        if args.N_importance > 0:
+            self.static_fine_nerf = NeRF(
+                D=args.netdepth_fine, W=args.netwidth_fine, args=args
+            )
 
         self.dynamic_coarse_nerfs = nn.ModuleList(
             [
@@ -43,12 +44,17 @@ class STaR(nn.Module):
                 for _ in range(self.num_vehicles)
             ]
         )
-        self.dynamic_fine_nerfs = nn.ModuleList(
-            [
-                NeRF(D=args.netdepth_fine // 2, W=args.netwidth_fine, args=args)
-                for _ in range(self.num_vehicles)
-            ]
-        )
+        if args.N_importance > 0:
+            self.dynamic_fine_nerfs = nn.ModuleList(
+                [
+                    NeRF(
+                        D=args.netdepth_fine // 2,
+                        W=args.netwidth_fine,
+                        args=args,
+                    )
+                    for _ in range(self.num_vehicles)
+                ]
+            )
 
     def get_nerf_params(self):
         return (
@@ -100,7 +106,9 @@ class STaR(nn.Module):
                     result[k] += [v]
 
         for k, v in result.items():
-            if len(result[k][0].shape) == 0:
+            if result[k][0] is None:
+                result[k] = None
+            elif len(result[k][0].shape) == 0:
                 result[k] = sum(v)
             else:
                 result[k] = torch.cat(v, 0)
@@ -128,6 +136,8 @@ class STaR(nn.Module):
             static_model = self.static_coarse_nerf
             dynamic_models = self.dynamic_coarse_nerfs
         else:
+            if self.N_importance <= 0:
+                raise ValueError("N_importance should be positive")
             static_model = self.static_fine_nerf
             dynamic_models = self.dynamic_fine_nerfs
 
@@ -211,4 +221,5 @@ class STaR(nn.Module):
             0,
             static_model.white_bkgd,
             far_dist=self.far_dist,
+            test=(not self.training),
         )

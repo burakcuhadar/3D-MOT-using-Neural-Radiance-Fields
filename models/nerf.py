@@ -32,13 +32,20 @@ NerfOutput: TypeAlias = Tuple[
 
 # Model
 class NeRF(nn.Module):
-    def __init__(self, D, W, args):
+    def __init__(self, D, W, args, has_time=False, more_view_layers=False):
         super(NeRF, self).__init__()
         self.D = D
         self.W = W
 
         # Create embedders for positional encoding
-        embedder, input_ch = get_embedder(args.multires, args.end_barf, args.i_embed)
+        if not has_time:
+            embedder, input_ch = get_embedder(
+                args.multires, args.end_barf, args.i_embed
+            )
+        else:
+            embedder, input_ch = get_embedder(
+                args.multires, args.end_barf, args.i_embed, input_dims=4
+            )
 
         input_ch_views = 0
         self.embedder_dirs = None
@@ -70,7 +77,13 @@ class NeRF(nn.Module):
 
         ### Implementation according to the official code release:
         ### (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
-        self.views_linears = nn.ModuleList([nn.Linear(input_ch_views + W, W // 2)])
+        if not more_view_layers:
+            self.views_linears = nn.ModuleList([nn.Linear(input_ch_views + W, W // 2)])
+        else:  # TODO remove if does not work
+            self.views_linears = nn.ModuleList(
+                [nn.Linear(input_ch_views + W, W // 2)]
+                + [nn.Linear(W // 2, W // 2) for i in range(D // 2)]
+            )
 
         ### Implementation according to the paper
         # self.views_linears = nn.ModuleList(
@@ -88,12 +101,12 @@ class NeRF(nn.Module):
         self.white_bkgd = args.white_bkgd
 
         # Weight Initialization
-        # for layer in self.views_linears:
-        #     torch.nn.init.kaiming_normal_(layer.weight, nonlinearity="relu")
-        #     torch.nn.init.zeros_(layer.bias)
-        # torch.nn.init.kaiming_normal_(self.alpha_linear.weight, nonlinearity="relu")
-        # torch.nn.init.zeros_(self.alpha_linear.bias)
-        # torch.nn.init.xavier_uniform_(self.rgb_linear.weight)
+        for layer in self.views_linears:
+            torch.nn.init.kaiming_normal_(layer.weight, nonlinearity="relu")
+            torch.nn.init.zeros_(layer.bias)
+        torch.nn.init.kaiming_normal_(self.alpha_linear.weight, nonlinearity="relu")
+        torch.nn.init.zeros_(self.alpha_linear.bias)
+        torch.nn.init.xavier_uniform_(self.rgb_linear.weight)
 
     @typechecked
     def forward(
@@ -103,6 +116,7 @@ class NeRF(nn.Module):
         z_vals: Optional[TensorType["num_rays", "num_samples"]] = None,
         rays_d: Optional[TensorType["num_rays", 3]] = None,
         step: Optional[int] = None,
+        time: Optional[float] = None,
     ) -> Union[RawNerfOutput, NerfOutput]:
         """
         1. Embed the input points and view directions if given
@@ -110,6 +124,10 @@ class NeRF(nn.Module):
         3. Estimate expected color integral
         """
         pts_flat = torch.reshape(pts, [-1, pts.shape[-1]])  # [N_rays*N_samples, 3]
+
+        if time is not None:
+            time = torch.ones_like(pts_flat[:, :1]) * time
+            pts_flat = torch.cat([pts_flat, time], -1)
 
         if viewdirs is not None:
             input_dirs = viewdirs[:, None].expand(pts.shape)

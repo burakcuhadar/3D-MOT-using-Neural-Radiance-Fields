@@ -17,7 +17,7 @@ patch_typeguard()
 
 def img2mse(img1, img2):
     return torch.mean((img1 - img2) ** 2)
-    
+
 
 def mse2psnr(mse):
     return -10.0 * torch.log(mse) / torch.log(torch.tensor([10.0], device=mse.device))
@@ -115,45 +115,8 @@ def sample_pts(
 def render_star_appinit(
     star_network, pts, viewdirs, z_vals, rays_o, rays_d, N_importance
 ):
-    result = {}
-
     # Pass through coarse network
     result_coarse = star_network(pts, viewdirs, z_vals, rays_d, is_coarse=True)
-
-    for k, v in result_coarse.items():
-        result[f"{k}0"] = v
-    
-    if N_importance > 0:
-        # Hierarchical volume sampling
-        z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        z_samples = sample_pdf(
-            z_vals_mid,
-            result_coarse["weights"][..., 1:-1],
-            N_importance,
-            det=(not star_network.training),
-        )
-        z_samples = z_samples.detach()
-        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-
-        pts = (
-            rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
-        )  # [N_rays, N_samples + N_importance, 3]
-
-        result_fine = star_network(pts, viewdirs, z_vals, rays_d, is_coarse=False)
-        # For visualization
-        z_std = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
-
-        result |= result_fine
-        result["z_std"] = z_std
-
-    return result
-
-
-def render_nerf_time(
-    nerf_network, pts, viewdirs, z_vals, rays_o, rays_d, N_importance, frame
-):
-    # Pass through coarse network
-    result_coarse = nerf_network(pts, viewdirs, z_vals, rays_d, frame, is_coarse=True)
 
     # Hierarchical volume sampling
     z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
@@ -161,7 +124,7 @@ def render_nerf_time(
         z_vals_mid,
         result_coarse["weights"][..., 1:-1],
         N_importance,
-        det=(not nerf_network.training),
+        det=(not star_network.training),
     )
     z_samples = z_samples.detach()
     z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
@@ -170,7 +133,7 @@ def render_nerf_time(
         rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
     )  # [N_rays, N_samples + N_importance, 3]
 
-    result_fine = nerf_network(pts, viewdirs, z_vals, rays_d, frame, is_coarse=False)
+    result_fine = star_network(pts, viewdirs, z_vals, rays_d, is_coarse=False)
 
     # For visualization
     z_std = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
@@ -257,43 +220,44 @@ def render_star_online(
     pose: Union[TensorType["num_vehicles", 4, 4], TensorType["num_vehicles", 7]],
     step: Optional[int] = None,
 ) -> StarRenderOutput:
-    result = {}
+    if N_importance <= 0:
+        raise NotImplementedError
 
     result_coarse = star_network(
         pts, viewdirs, z_vals, rays_d, pose, is_coarse=True, step=step
     )
 
+    # Hierarchical volume sampling
+    # z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    # z_samples = sample_pdf(
+    #     z_vals_mid,
+    #     result_coarse["weights"][..., 1:-1],
+    #     N_importance,
+    #     det=(not star_network.training),
+    # )
+    # z_samples = z_samples.detach()
+    # z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+
+    z_samples = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    z_samples = z_samples.detach()
+    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+
+    pts = (
+        rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
+    )  # [N_rays, N_samples + N_importance, 3]
+
+    result_fine = star_network(
+        pts, viewdirs, z_vals, rays_d, pose, is_coarse=False, step=step
+    )
+
+    result = {}
+    # result |= result_fine
+    for k, v in result_fine.items():
+        result[k] = v
     for k, v in result_coarse.items():
         result[f"{k}0"] = v
 
-    if N_importance > 0:
-        # Hierarchical volume sampling
-        z_vals_mid = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        z_samples = sample_pdf(
-            z_vals_mid,
-            result_coarse["weights"][..., 1:-1],
-            N_importance,
-            det=(not star_network.training),
-        )
-        z_samples = z_samples.detach()
-        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-
-        """z_samples = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        z_samples.detach()"""
-        # z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-
-        pts = (
-            rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
-        )  # [N_rays, N_samples + N_importance, 3]
-
-        result_fine = star_network(
-            pts, viewdirs, z_vals, rays_d, pose, is_coarse=False, step=step
-        )    
-        # result |= result_fine
-        for k, v in result_fine.items():
-            result[k] = v
-        
-        result["z_std"] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
+    result["z_std"] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
 
     return result
 
@@ -327,7 +291,7 @@ def raw2outputs(
     #     if dists[dists <= 1e-10].shape[0] > 100:
     #         #print("dists has 0: ", dists[dists <= 1e-10].shape[0])
     #         print(z_vals)
-    # TODO #zero_dist_count = dists[dists <= 1e-10].shape[0]
+    # #zero_dist_count = dists[dists <= 1e-10].shape[0]
 
     rgb = torch.sigmoid(raw_rgb)  # [N_rays, N_samples, 3]
     noise = 0.0
@@ -368,7 +332,7 @@ def raw2outputs(
         "depth": depth_map,
         "dists": dists,  # used for sigma loss
         "z_vals": z_vals,  # used for sigma loss
-        # TODO #"zero_dist_count": zero_dist_count
+        # "zero_dist_count": zero_dist_count
     }
 
     # I think in the paper they dont use regularization for appearance init. But it may still be helpful,
@@ -390,7 +354,6 @@ def raw2outputs_star(
     raw_noise_std=0,
     white_bkgd=False,
     far_dist=1e10,
-    test=False,
 ) -> StarNetworkOutput:
     device = raw_alpha_static.device
 
@@ -451,7 +414,7 @@ def raw2outputs_star(
         ),
         -1,
     )[:, :-1]
-    # T = T_s * torch.prod(T_d, dim=1) #TODO which one?
+    # T = T_s * torch.prod(T_d, dim=1) # which one?
 
     rgb_map = torch.sum(
         T[..., None]
@@ -471,7 +434,7 @@ def raw2outputs_star(
     #         + torch.sum(raw_alpha_dynamic[..., None] * raw_rgb_dynamic, dim=1)
     #     )
     #     / raw_alpha_sum[..., None]
-    # )  # TODO try with sigmoid!
+    # )
 
     # rgb_map = torch.sum(
     #     T[..., None] * alpha_total[..., None] * weighted_rgb,
@@ -491,7 +454,7 @@ def raw2outputs_star(
         dynamic_weights * z_vals[:, None, :], -1
     )  # N_rays, num_vehicles
     # rgb_map_dynamic = torch.where(
-    #     depth_dynamic[..., None] < 0.69,  # TODO get from args.
+    #     depth_dynamic[..., None] < 0.69,  # todo: get constant from args.
     #     rgb_map_dynamic,
     #     torch.zeros_like(rgb_map_dynamic),
     # )
@@ -513,6 +476,7 @@ def raw2outputs_star(
         1e-10 * torch.ones_like(depth_map), depth_map / weights_sum
     )
     acc_map = torch.sum(weights, -1)
+    # acc_map_dynamic = torch.sum(dynamic_weights, -1)
 
     if white_bkgd:
         rgb_map = rgb_map + (1.0 - acc_map[..., None])
@@ -528,32 +492,27 @@ def raw2outputs_star(
     )
 
     loss_ray_reg = compute_ray_reg(sigma_d, sigma_sum)
-    loss_static_reg = compute_static_reg(sigma_s, alpha_static)
-    loss_dynamic_reg = compute_dynamic_reg(sigma_d)
+    loss_static_reg = compute_static_reg(T_s, alpha_static)
+    loss_dynamic_reg = compute_dynamic_reg(T_d, alpha_dynamic)
 
-    if test:
-        alpha_dynamic_all = raw2alpha(
-            raw_alpha_dynamic.sum(dim=1) + noise, dists
-        )
-        T_d_all = torch.cumprod(
-            torch.cat(
-                [
-                    torch.ones(
-                        (alpha_dynamic_all.shape[0], 1), device=device
-                    ),
-                    1.0 - alpha_dynamic_all + 1e-10,
-                ],
-                -1,
-            ),
-            -1,
-        )[
-            ..., :-1
-        ]  # N_rays, N_samples      
-        rgb_dynamic_all = torch.sum(
-            T_d_all[..., None] * torch.sum(alpha_dynamic[..., None] * rgb_dynamic, dim=1),
-            dim=-2,
-        )
-
+    # print("max sigma sum", torch.sum(sigma_d, dim=-1).max())
+    # print("min sigma sum", torch.sum(sigma_d, dim=-1).min())
+    # print("max acc dyna sum", acc_map_dynamic.max())
+    # print("min acc dyna sum", acc_map_dynamic.min())
+    # print("max alpha sum", alpha_dynamic.sum(dim=-1).max())
+    # print("min alpha sum", alpha_dynamic.sum(dim=-1).min())
+    # print("min T_d", T_d.min())
+    # print("max T_d", T_d.max())
+    # print("min T_d[-1]", T_d[:, -1].min())
+    # print("max T_d[-1]", T_d[:, -1].max())
+    # print("min T_s", T_s.min())
+    # print("max T_s", T_s.max())
+    # print("min T_s[-1]", T_s[:, -1].min())
+    # print("max T_s[-1]", T_s[:, -1].max())
+    # print("min T", T.min())
+    # print("max T", T.max())
+    # print("min T[-1]", T[:, -1].min())
+    # print("max T[-1]", T[:, -1].max())
 
     return {
         "rgb": rgb_map,
@@ -566,13 +525,13 @@ def raw2outputs_star(
         "depth_static": depth_static,
         "depth_dynamic": depth_dynamic,
         "dynamic_transmittance": T_d[:, :, -1],
+        # "entropy": entropy,
         # Regularization terms
         "loss_alpha_entropy": loss_alpha_entropy,
         "loss_dynamic_vs_static_reg": loss_dynamic_vs_static_reg,
         "loss_ray_reg": loss_ray_reg,
         "loss_static_reg": loss_static_reg,
         "loss_dynamic_reg": loss_dynamic_reg,
-        "rgb_dynamic_all": rgb_dynamic_all if test else None,
     }
 
 
@@ -685,7 +644,7 @@ def compute_ray_reg(sigma_d, total_sigma):
     num_vehicles = sigma_d.shape[1]
 
     normed_sigma_d = sigma_d / total_sigma.clamp(min=constants.EPS)[:, None, :]
-    # normed_sigma_d = F.softplus(normed_sigma_d)
+    normed_sigma_d = F.sigmoid(normed_sigma_d)
 
     loss = (
         torch.mean(torch.max(normed_sigma_d, dim=-1)[0] ** 2.0, dim=0).sum()
@@ -695,27 +654,56 @@ def compute_ray_reg(sigma_d, total_sigma):
     return loss
 
 
-def compute_static_reg(sigma_s, alpha_s):
+def compute_static_reg(T_s, alpha_s):
     alpha_static_clamp = alpha_s.clamp(min=constants.EPS, max=1 - constants.EPS)
 
     mask_thresold = 0.1
-    sigma_s_sum = torch.sum(sigma_s, dim=-1, keepdims=True)
+    # sigma_s_sum = torch.sum(sigma_s, dim=-1, keepdims=True)
+    # print("sigma_s_sum max min", sigma_s_sum.max(), sigma_s_sum.min())
+    # mask = torch.where(sigma_s_sum < mask_thresold, 0.0, 1.0)
+    # print("mask nonzero", torch.count_nonzero(mask))
+    # alpha_s_sum = torch.sum(alpha_s, dim=-1, keepdims=True)
+    # print("alpha_s_sum max min", alpha_s_sum.max(), alpha_s_sum.min())
+    # mask = torch.where(alpha_s_sum < mask_thresold, 0.0, 1.0)
+    # print("mask nonzero", torch.count_nonzero(mask))
 
-    # if torch.any(sigma_s_sum < mask_thresold):
-    #     print("sigma_s_sum has 0: ", sigma_s_sum[sigma_s_sum < mask_thresold].shape[0])
+    # mask = torch.where(T_s[:, -1] < mask_thresold, 0.0, 1.0)[:, None]
+    # p = alpha_static_clamp / torch.sum(alpha_static_clamp, dim=-1, keepdims=True)
+    # loss = torch.mean(mask * -torch.mean(p * torch.log(p), dim=-1, keepdims=True))
 
-    mask = torch.where(sigma_s_sum < mask_thresold, 0.0, 1.0)
     p = alpha_static_clamp / torch.sum(alpha_static_clamp, dim=-1, keepdims=True)
+    loss = torch.mean(-torch.mean(p * torch.log(p), dim=-1, keepdims=True))
+
+    return loss
+
+
+"""emer-nerf way"""
+# def compute_dynamic_reg(sigma_d):
+#     return sigma_d.mean()
+
+
+# "num_rays", "num_vehicles", "num_samples"
+def compute_dynamic_reg(T_d, alpha_d):
+    alpha_dynamic_clamp = alpha_d.clamp(min=constants.EPS, max=1 - constants.EPS)
+
+    mask_thresold = 0.1
+    # sigma_d_sum = torch.sum(sigma_d, dim=-1, keepdims=True)  # n_rays, n_vehicles, 1
+    # print("sigma_d_sum max min", sigma_d_sum.max(), sigma_d_sum.min())
+    # mask = torch.where(sigma_d_sum < mask_thresold, 0.0, 1.0)  # n_rays, n_vehicles, 1
+    # print("mask nonzero", torch.count_nonzero(mask))
+    mask = torch.where(T_d[:, :, -1] < mask_thresold, 0.0, 1.0)[:, :, None]
+
+    p = alpha_dynamic_clamp / torch.sum(
+        alpha_dynamic_clamp, dim=-1, keepdims=True
+    )  # n_rays, n_vehicles, n_samples
     loss = torch.mean(mask * -torch.mean(p * torch.log(p), dim=-1, keepdims=True))
 
     return loss
 
 
-def compute_dynamic_reg(sigma_d):
-    return sigma_d.mean()
-
-
+# old not used anymore
 # Hierarchical sampling (section 5.2)
+'''
 def sample_pdf(bins, weights, N_samples, det=False):
     device = weights.device
     # Get pdf
@@ -759,9 +747,9 @@ def sample_pdf(bins, weights, N_samples, det=False):
     samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
 
     return samples
-
-
 '''
+
+"""
 def sample_pdf(bins, weights, N_samples, det=False):
     device = weights.device
     # Get pdf
@@ -796,4 +784,74 @@ def sample_pdf(bins, weights, N_samples, det=False):
     samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
 
     return samples
-'''
+"""
+
+
+# Modified from nerf studio
+@typechecked
+def sample_pdf(
+    bins,
+    weights: TensorType["num_rays", "num_samples"],
+    num_samples,
+    det=False,
+    single_jitter=False,
+):
+    num_bins = num_samples + 1
+    histogram_padding = 1e-5
+    eps = 1e-5
+
+    weights = weights + histogram_padding
+
+    # Add small offset to rays with zero weight to prevent NaNs
+    weights_sum = torch.sum(weights, dim=-1, keepdim=True)
+    padding = torch.relu(eps - weights_sum)
+    weights = weights + padding / weights.shape[-1]
+    weights_sum += padding
+
+    pdf = weights / weights_sum
+    cdf = torch.min(torch.ones_like(pdf), torch.cumsum(pdf, dim=-1))
+    cdf = torch.cat([torch.zeros_like(cdf[..., :1]), cdf], dim=-1)
+
+    if det:
+        # Stratified samples between 0 and 1
+        u = torch.linspace(
+            0.0, 1.0 - (1.0 / num_bins), steps=num_bins, device=cdf.device
+        )
+        u = u.expand(size=(*cdf.shape[:-1], num_bins))
+        if single_jitter:
+            rand = torch.rand((*cdf.shape[:-1], 1), device=cdf.device) / num_bins
+        else:
+            rand = (
+                torch.rand((*cdf.shape[:-1], num_samples + 1), device=cdf.device)
+                / num_bins
+            )
+        u = u + rand
+    else:
+        # Uniform samples between 0 and 1
+        u = torch.linspace(
+            0.0, 1.0 - (1.0 / num_bins), steps=num_bins, device=cdf.device
+        )
+        u = u + 1.0 / (2 * num_bins)
+        u = u.expand(size=(*cdf.shape[:-1], num_bins))
+    u = u.contiguous()
+
+    # existing_bins = torch.cat(
+    #     [
+    #         ray_samples.spacing_starts[..., 0],
+    #         ray_samples.spacing_ends[..., -1:, 0],
+    #     ],
+    #     dim=-1,
+    # )
+
+    inds = torch.searchsorted(cdf, u, right=True)
+    below = torch.clamp(inds - 1, 0, bins.shape[-1] - 1)
+    above = torch.clamp(inds, 0, bins.shape[-1] - 1)
+    cdf_g0 = torch.gather(cdf, -1, below)
+    bins_g0 = torch.gather(bins, -1, below)
+    cdf_g1 = torch.gather(cdf, -1, above)
+    bins_g1 = torch.gather(bins, -1, above)
+
+    t = torch.clip(torch.nan_to_num((u - cdf_g0) / (cdf_g1 - cdf_g0), 0), 0, 1)
+    samples = bins_g0 + t * (bins_g1 - bins_g0)
+
+    return samples

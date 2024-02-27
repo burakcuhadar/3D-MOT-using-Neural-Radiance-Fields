@@ -89,7 +89,16 @@ class StarOnlineCallback(Callback):
 
     @torch.no_grad()
     def on_train_epoch_end(self, trainer, pl_module: pl.LightningModule):
-        avg_loss = torch.stack(pl_module.training_fine_losses).mean().cpu().item()
+        # avg_loss = torch.stack(pl_module.training_fine_losses).mean().cpu().item()
+        avg_loss = pl_module.running_fine_loss / pl_module.train_dataset.step_num
+        pl_module.running_fine_loss = 0.0
+
+        if trainer.current_epoch < pl_module.args.precrop_iters:
+            return
+        else:
+            # print("crop finished")
+            pl_module.train_dataset.crop = False
+            pl_module.val_dataset.crop = False
 
         if pl_module.current_frame_num == self.args.initial_num_frames:
             if avg_loss <= self.online_thres:
@@ -139,8 +148,6 @@ class StarOnlineCallback(Callback):
                 pl_module.logger.log_metrics(
                     {"train/start_frame": pl_module.start_frame}
                 )
-
-        pl_module.training_fine_losses.clear()
 
         # Stop the training if maximum number of frames is reached
         if pl_module.current_frame_num.item() > self.max_num_frames:

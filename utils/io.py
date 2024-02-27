@@ -5,6 +5,7 @@ import numpy as np
 from collections import OrderedDict
 import logging
 import pprint
+import pypose as pp
 
 pprint = pprint.PrettyPrinter()
 
@@ -147,7 +148,7 @@ def config_parser():
     parser.add_argument(
         "--lrate_decay",
         type=int,
-        default=500,
+        default=None,
         help="Period of learning rate decay in epochs",
     )
     parser.add_argument(
@@ -288,16 +289,10 @@ def config_parser():
         default=".",
         help="directory of the code to be logged on wandb",
     )
-
     parser.add_argument(
         "--save_video_frames",
         action="store_true",
         help="denotes whether frames of the rendered video will also be saved as png",
-    )
-    parser.add_argument(
-        "--no_test_set",
-        action="store_true",
-        help="denotes whether the dataset has no test views",
     )
     parser.add_argument(
         "--render_test",
@@ -312,9 +307,13 @@ def config_parser():
     )
 
     # training options
+    parser.add_argument(
+        "--precrop_iters",  # TODO rename to epoch
+        type=int,
+        default=0,
+        help="number of steps to train on central crops",
+    )
     """NOTE: precrop is not implemented
-    parser.add_argument("--precrop_iters", type=int, default=0,
-                        help='number of steps to train on central crops')
     parser.add_argument("--precrop_frac", type=float,
                         default=.5, help='fraction of img taken for central crops') 
     """
@@ -407,12 +406,6 @@ def config_parser():
         "--epoch_ckpt", type=int, default=100, help="frequency of weight ckpt saving"
     )
     parser.add_argument(
-        "--epoch_print",
-        type=int,
-        default=10,
-        help="frequency of logging loss and metrics to console",
-    )
-    parser.add_argument(
         "--epoch_val", type=int, default=50, help="frequency of validation view saving"
     )
 
@@ -499,3 +492,28 @@ def set_matmul_precision():
     if ampere_or_later:
         print("Setting matmul precision to medium...")
         torch.set_float32_matmul_precision("medium")
+
+
+def save_poses_to_file(poses, gt_relative_poses, eval_last_frame, folder, scale=100):
+    num_vehicles = poses[0].shape[1]
+    for i in range(num_vehicles):
+        os.makedirs(f"{folder}/vehicle{i}/", exist_ok=True)
+
+        with open(f"{folder}/vehicle{i}/poses.txt", "w") as f:
+            for j in range(1, eval_last_frame):
+                p = (
+                    pp.SE3(poses[j - 1][0, i])
+                    .matrix()
+                    .cpu()
+                    .detach()
+                    .numpy()[:3, :]
+                )
+                p[:3, -1] = p[:3, -1] * scale
+
+                f.write(" ".join(map(str, p.flatten())) + "\n")
+
+        with open(f"{folder}/vehicle{i}/gt_relative_poses.txt", "w") as f:
+            for j in range(1, eval_last_frame):
+                p = gt_relative_poses[i, j, :3, :].cpu().detach().numpy()
+                p[:3, -1] = p[:3, -1] * scale
+                f.write(" ".join(map(str, p.flatten())) + "\n")

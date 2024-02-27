@@ -35,9 +35,8 @@ netdepth = 8
 netdepth_fine = 8
 netwidth = 256
 netwidth_fine = 256
-N_samples = 1024
-#N_importance = 256
-N_importance = -1
+N_samples = 256
+N_importance = 512
 end_barf = -1
 
 chunk = 5000
@@ -53,7 +52,7 @@ lrate_decay_rate = 0.5
 
 #N_rand = 600
 #mixed_precision = True
-N_rand = 1000
+N_rand = 1500
 mixed_precision = False
 
 

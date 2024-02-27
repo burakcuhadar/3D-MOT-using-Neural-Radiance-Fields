@@ -6,7 +6,7 @@ import torch
 import pytorch_lightning as pl
 import pypose as pp
 from torch.utils.data import DataLoader
-from models.star__ import STaR
+from models.star_mipnerf import STaR
 import torch.nn as nn
 from einops import rearrange
 from torch import inf
@@ -42,15 +42,14 @@ from utils.logging__ import (
     log_2d_iou,
     log_3d_iou,
 )
-from utils.visualization import visualize_depth, visualize_depth_with_values
+from utils.visualization import visualize_depth
 from utils.metrics import get_pose_metrics_multi
 from utils.io import *
 from utils.test import test_step_for_one_frame
-from utils.mesh import extract_mesh
 
 
 class StarOnline(pl.LightningModule):
-    def __init__(self, args, star_network):
+    def __init__(self, args, star_network: STaR):
         super().__init__()
 
         self.args = args
@@ -84,44 +83,13 @@ class StarOnline(pl.LightningModule):
         self.loss = nn.MSELoss()
 
     def forward(self, batch):
-        pts, z_vals = sample_pts(
-            batch["rays_o"],
-            batch["rays_d"],
-            self.train_dataset.near,
-            self.train_dataset.far,
-            self.args.N_samples,
-            self.args.perturb,
-            self.args.lindisp,
-            self.training,
-        )
-
         viewdirs = batch["rays_d"] / torch.norm(
             batch["rays_d"], dim=-1, keepdim=True
         )  # [N_rays, 3]
 
         if self.args.load_gt_poses:
-            if self.training:
-                """pose0 = torch.zeros((1, 6), requires_grad=False, device=self.device)
-                poses = torch.cat((pose0, batch["gt_relative_poses"][1:, ...]), dim=0)
-                pose = poses[batch["frames"][0]][0]"""
-
-                # pose = batch["gt_relative_poses"][:, batch["frames"][0], ...][:,0]
-
-                """pose = self.train_dataset.gt_relative_poses_matrices.to(
-                    batch["rays_o"].device
-                )[:, batch["frames"][0], ...][:,0]"""
-
-                # pose = self.gt_poses[:, batch["frames"][0], ...][:, 0]
-                pose = self.gt_poses_quat[:, batch["frames"][0], ...][:, 0]
-            else:
-                pose = self.gt_poses_quat[:, batch["frames"][0], ...][:, 0]
+            pose = self.gt_poses_quat[:, batch["frames"][0], ...][:, 0]
         else:
-            """
-            pose0 = torch.zeros((self.args.num_vehicles, 1, 6), requires_grad=False, device=self.device)
-            poses = torch.cat((pose0, self.poses), dim=1)
-            pose = poses[:, batch["frames"][0], ...][:, 0] # num_vehicles, 6
-            """
-
             pose0 = (
                 pp.identity_SE3(self.args.num_vehicles, device=self.device)
                 .tensor()
@@ -134,52 +102,36 @@ class StarOnline(pl.LightningModule):
 
             pose = poses[batch["frames"][0], :, ...][0]  # 2 7
 
-            """
-            pose0 = pp.identity_SE3(device=self.device).tensor().unsqueeze(0)
-            poses = torch.cat(([pose0] + [posei for posei in self.poses]), dim=0)
-            pose = poses[batch["frames"][0]][0]
-            """
-
-        return render_star_online(
-            self.star_network,
-            pts,
-            viewdirs,
-            z_vals,
-            batch["rays_o"],
-            batch["rays_d"],
-            self.args.N_importance,
-            pose,
-            step=self.current_epoch,
-        )
+        return self.star_network(batch["rays_o"], viewdirs, pose)
 
     def training_step(self, batch, batch_idx):
         result = self(batch)
 
-        img_loss0 = self.loss(result["rgb0"], batch["target"])
-        psnr0 = mse2psnr(img_loss0)
+        # img_loss = img2mse(result["rgb"], batch["target"])
+        img_loss = self.loss(result["rgb"], batch["target"])
+
+        # loss = img_loss
+        psnr = mse2psnr(img_loss)
         # img_loss0 = img2mse(result["rgb0"], batch["target"])
-        loss = img_loss0
+        img_loss0 = self.loss(result["rgb0"], batch["target"])
 
-        if self.args.N_importance > 0:
-            # img_loss = img2mse(result["rgb"], batch["target"])
-            img_loss = self.loss(result["rgb"], batch["target"])
-            # loss = img_loss
-            psnr = mse2psnr(img_loss)
-            loss = loss + img_loss
+        loss = img_loss + 0.1 * img_loss0
+        psnr0 = mse2psnr(img_loss0)
 
-        with torch.no_grad():
-            if self.args.N_importance > 0:
-                self.running_fine_loss += img_loss.detach()
-            else:
-                self.running_fine_loss += img_loss0.detach()
+        # entropy_loss = (result["entropy"] + result["entropy0"]) / 2.0
+        # loss += self.args.entropy_weight * entropy_loss
+
+        """
+        "loss_alpha_entropy": loss_alpha_entropy,
+        "loss_dynamic_vs_static_reg": loss_dynamic_vs_static_reg,
+        "loss_ray_reg": loss_ray_reg,
+        "loss_static_reg": loss_static_reg,
+        """
 
         if self.args.lambda_alpha_entropy > 0:
-            loss_alpha_entropy = result["loss_alpha_entropy0"]
-            if self.args.N_importance > 0:
-                loss_alpha_entropy = (
-                    loss_alpha_entropy + result["loss_alpha_entropy"]
-                ) / 2.0
-
+            loss_alpha_entropy = (
+                result["loss_alpha_entropy"] + result["loss_alpha_entropy0"]
+            ) / 2.0
             loss += args.lambda_alpha_entropy * loss_alpha_entropy
             self.log(
                 "train/alpha_entropy",
@@ -190,13 +142,10 @@ class StarOnline(pl.LightningModule):
             )
 
         if self.args.lambda_dynamic_vs_static_reg > 0:
-
-            loss_dynamic_vs_static_reg = result["loss_dynamic_vs_static_reg0"]
-            if self.args.N_importance > 0:
-                loss_dynamic_vs_static_reg = (
-                    loss_dynamic_vs_static_reg + result["loss_dynamic_vs_static_reg"]
-                ) / 2.0
-
+            loss_dynamic_vs_static_reg = (
+                result["loss_dynamic_vs_static_reg"]
+                + result["loss_dynamic_vs_static_reg0"]
+            ) / 2.0
             loss += args.lambda_dynamic_vs_static_reg * loss_dynamic_vs_static_reg
             self.log(
                 "train/dynamic_vs_static_reg",
@@ -207,10 +156,7 @@ class StarOnline(pl.LightningModule):
             )
 
         if self.args.lambda_ray_reg > 0:
-            loss_ray_reg = result["loss_ray_reg0"]
-            if self.args.N_importance > 0:
-                loss_ray_reg = (loss_ray_reg + result["loss_ray_reg"]) / 2.0
-
+            loss_ray_reg = (result["loss_ray_reg"] + result["loss_ray_reg0"]) / 2.0
             loss += args.lambda_ray_reg * loss_ray_reg
             self.log(
                 "train/ray_reg",
@@ -221,12 +167,9 @@ class StarOnline(pl.LightningModule):
             )
 
         if self.args.lambda_static_reg > 0:
-            loss_lambda_static_reg = result["loss_static_reg0"]
-            if self.args.N_importance > 0:
-                loss_lambda_static_reg = (
-                    loss_lambda_static_reg + result["loss_static_reg"]
-                ) / 2.0
-
+            loss_lambda_static_reg = (
+                result["loss_static_reg"] + result["loss_static_reg0"]
+            ) / 2.0
             loss += self.args.lambda_static_reg * loss_lambda_static_reg
             self.log(
                 "train/static_reg",
@@ -240,12 +183,9 @@ class StarOnline(pl.LightningModule):
             self.args.lambda_dynamic_reg > 0
             and self.args.epoch_start_dynamic_reg <= self.current_epoch
         ):
-            loss_lambda_dynamic_reg = result["loss_dynamic_reg0"]
-            if self.args.N_importance > 0:
-                loss_lambda_dynamic_reg = (
-                    loss_lambda_dynamic_reg + result["loss_dynamic_reg"]
-                ) / 2.0
-
+            loss_lambda_dynamic_reg = (
+                result["loss_dynamic_reg"] + result["loss_dynamic_reg0"]
+            ) / 2.0
             loss += self.args.lambda_dynamic_reg * loss_lambda_dynamic_reg
             self.log(
                 "train/dynamic_reg",
@@ -272,22 +212,15 @@ class StarOnline(pl.LightningModule):
             )
             loss = loss + self.args.sigma_lambda * sigma_loss
 
-        if self.args.N_importance > 0:
-            self.log(
-                "train/fine_loss",
-                img_loss,
-                on_step=False,
-                on_epoch=True,
-                batch_size=self.args.N_rand,
-            )
-            self.log(
-                "train/psnr",
-                psnr,
-                on_step=False,
-                on_epoch=True,
-                batch_size=self.args.N_rand,
-            )
+        self.running_fine_loss += img_loss.detach()
 
+        self.log(
+            "train/fine_loss",
+            img_loss,
+            on_step=False,
+            on_epoch=True,
+            batch_size=self.args.N_rand,
+        )
         self.log(
             "train/loss",
             loss,
@@ -296,7 +229,13 @@ class StarOnline(pl.LightningModule):
             on_epoch=True,
             batch_size=self.args.N_rand,
         )
-
+        self.log(
+            "train/psnr",
+            psnr,
+            on_step=False,
+            on_epoch=True,
+            batch_size=self.args.N_rand,
+        )
         self.log(
             "train/psnr0",
             psnr0,
@@ -329,21 +268,11 @@ class StarOnline(pl.LightningModule):
         optimizer = torch.optim.Adam(
             [
                 {
-                    "params": list(self.star_network.static_coarse_nerf.parameters())
-                    + (
-                        list(self.star_network.static_fine_nerf.parameters())
-                        if self.args.N_importance > 0
-                        else []
-                    ),
+                    "params": list(self.star_network.static_nerf.parameters()),
                     "lr": self.args.lrate_static,
                 },
                 {
-                    "params": list(self.star_network.dynamic_coarse_nerfs.parameters())
-                    + (
-                        list(self.star_network.dynamic_fine_nerfs.parameters())
-                        if self.args.N_importance > 0
-                        else []
-                    ),
+                    "params": list(self.star_network.dynamic_nerfs.parameters()),
                     "lr": self.args.lrate_dynamic,
                 },
             ],
@@ -493,15 +422,15 @@ class StarOnline(pl.LightningModule):
 
         self.log("val/frame", batch["frames"][0, 0])
 
-        val_rgb = result["rgb"] if self.args.N_importance > 0 else result["rgb0"]
-        val_mse = self.loss(val_rgb, batch["target"])
+        # val_mse = img2mse(result["rgb"], batch["target"])
+        val_mse = self.loss(result["rgb"], batch["target"])
         psnr = mse2psnr(val_mse)
         lpips = self.eval_lpips(
-            torch.reshape(val_rgb, (val_H, val_W, 3)),
+            torch.reshape(result["rgb"], (val_H, val_W, 3)),
             torch.reshape(batch["target"], (val_H, val_W, 3)),
         )
         ssim = self.eval_ssim(
-            torch.reshape(val_rgb, (val_H, val_W, 3)),
+            torch.reshape(result["rgb"], (val_H, val_W, 3)),
             torch.reshape(batch["target"], (val_H, val_W, 3)),
         )
 
@@ -516,6 +445,20 @@ class StarOnline(pl.LightningModule):
             "rgb0",
         )
         depth0 = visualize_depth(result["depth0"]).reshape((val_H, val_W, 3))
+        # z_std = to8b(
+        #     torch.reshape(result["z_std"], (val_H, val_W, 1)).cpu().detach().numpy(),
+        #     "z_std",
+        # )
+        rgb = to8b(
+            torch.reshape(result["rgb"], (val_H, val_W, 3)).cpu().detach().numpy(),
+            "rgb",
+        )
+        depth = visualize_depth(result["depth"]).reshape((val_H, val_W, 3))
+        target = to8b(
+            torch.reshape(batch["target"], (val_H, val_W, 3)).cpu().detach().numpy(),
+            "target",
+        )
+
         # Visualize static and dynamic nerfs separately
         rgb_static0 = to8b(
             torch.reshape(result["rgb_static0"], (val_H, val_W, 3))
@@ -526,104 +469,65 @@ class StarOnline(pl.LightningModule):
         )
         rgb_dynamic0s = to8b(
             result["rgb_dynamic0"]
-            .transpose(1, 0)
+            .transpose(0, 1)
             .reshape((self.args.num_vehicles, val_H, val_W, 3))
             .cpu()
             .detach()
             .numpy(),
             "rgb_dynamic0s",
         )
-
-        depth_static0 = visualize_depth(result["depth_static0"]).reshape(
+        rgb_static = to8b(
+            torch.reshape(result["rgb_static"], (val_H, val_W, 3))
+            .cpu()
+            .detach()
+            .numpy(),
+            "rgb_static",
+        )
+        rgb_dynamics = to8b(
+            result["rgb_dynamic"]
+            .transpose(0, 1)
+            .reshape((self.args.num_vehicles, val_H, val_W, 3))
+            .cpu()
+            .detach()
+            .numpy(),
+            "rgb_dynamics",
+        )
+        depth_static = visualize_depth(result["depth_static"]).reshape(
             (val_H, val_W, 3)
         )
-        depth_dynamic0s, normalized_depth_dynamic0s = visualize_depth(
-            result["depth_dynamic0"].transpose(1, 0),
+        depth_dynamics = visualize_depth(
+            result["depth_dynamic"].transpose(0, 1),
             val_H,
             val_W,
             multi_vehicle=True,
-            return_normalized=True,
         )
-        depth_dynamic0_vals = visualize_depth_with_values(
-            depth_dynamic0s, normalized_depth_dynamic0s
+        depth_static0 = visualize_depth(result["depth_static0"]).reshape(
+            (val_H, val_W, 3)
         )
-
-        if self.args.N_importance > 0:
-            z_std = to8b(
-                torch.reshape(result["z_std"], (val_H, val_W, 1))
-                .cpu()
-                .detach()
-                .numpy(),
-                "z_std",
-            )
-            rgb = to8b(
-                torch.reshape(result["rgb"], (val_H, val_W, 3)).cpu().detach().numpy(),
-                "rgb",
-            )
-            depth = visualize_depth(result["depth"]).reshape((val_H, val_W, 3))
-            target = to8b(
-                torch.reshape(batch["target"], (val_H, val_W, 3))
-                .cpu()
-                .detach()
-                .numpy(),
-                "target",
-            )
-
-            rgb_static = to8b(
-                torch.reshape(result["rgb_static"], (val_H, val_W, 3))
-                .cpu()
-                .detach()
-                .numpy(),
-                "rgb_static",
-            )
-            rgb_dynamics = to8b(
-                result["rgb_dynamic"]
-                .transpose(1, 0)
-                .reshape((self.args.num_vehicles, val_H, val_W, 3))
-                .cpu()
-                .detach()
-                .numpy(),
-                "rgb_dynamics",
-            )
-            depth_static = visualize_depth(result["depth_static"]).reshape(
-                (val_H, val_W, 3)
-            )
-
-            depth_dynamics, normalized_depth_dynamics = visualize_depth(
-                result["depth_dynamic"].transpose(1, 0),
-                val_H,
-                val_W,
-                multi_vehicle=True,
-                return_normalized=True,
-            )
-            depth_dynamics_vals = visualize_depth_with_values(
-                depth_dynamics, normalized_depth_dynamics
-            )
+        depth_dynamic0s = visualize_depth(
+            result["depth_dynamic0"].transpose(0, 1),
+            val_H,
+            val_W,
+            multi_vehicle=True,
+        )
 
         self.logger.log_image(
             "val/imgs",
             [
-                *(
-                    [
-                        rgb,
-                        target,
-                        *rgb_dynamics,
-                        rgb_static,
-                        depth,
-                        *depth_dynamics,
-                        *depth_dynamics_vals,
-                        depth_static,
-                    ]
-                    if self.args.N_importance > 0
-                    else []
-                ),
+                rgb,
+                target,
+                *rgb_dynamics,
+                rgb_static,
+                depth,
+                *depth_dynamics,
+                depth_static,
                 rgb0,
                 *rgb_dynamic0s,
                 rgb_static0,
                 depth0,
                 *depth_dynamic0s,
-                *depth_dynamic0_vals,
                 depth_static0,
+                # z_std,
             ],
             step=self.global_step,
         )
@@ -651,6 +555,20 @@ class StarOnline(pl.LightningModule):
             self.log(f"val/euler_rot_error{i}", rot_error_eulers[i])
             self.log(f"val/last_euler_rot_error{i}", last_rot_error_eulers[i])
 
+        """TODO adapt for multi vehicle
+        rpe_trans_rmse, rpe_rot_rmse = evaluate_rpe(
+            self.poses[: self.current_frame_num - 1],
+            self.train_dataset.gt_relative_poses_matrices[
+                1 : self.current_frame_num
+            ].to(self.device),
+        )
+        self.log("val/rpe_trans_rmse", rpe_trans_rmse)
+        self.log("val/rpe_rot_rmse", rpe_rot_rmse)
+        """
+
+        for pose in self.poses:
+            print(pose.data, "\n")
+
     def test_step(self, batch, batch_idx):
         self.test_rgb_gts.append([])
         self.test_rgbs.append([])
@@ -667,62 +585,21 @@ class StarOnline(pl.LightningModule):
             result = self(batch)
             mse = self.loss(result["rgb"], batch["target"][i])
             psnr = mse2psnr(mse)
-            gt_dynamic_mask = batch["semantic_mask"][i]
-            gt_static_mask = ~gt_dynamic_mask
-            psnr_dynamic = mse2psnr(
-                img2mse(
-                    result["rgb"][gt_dynamic_mask],
-                    batch["target"][i][gt_dynamic_mask],
-                )
-            )
-            psnr_static = mse2psnr(
-                img2mse(
-                    result["rgb"][gt_static_mask],
-                    batch["target"][i][gt_static_mask],
-                )
-            )
             test_H = self.test_dataset.H
             test_W = self.test_dataset.W
-
             lpips = self.eval_lpips(
                 torch.reshape(result["rgb"], (test_H, test_W, 3)),
                 torch.reshape(batch["target"][i], (test_H, test_W, 3)),
             )
-            rgb_gt_dynamic = batch["target"][i].clone()
-            rgb_gt_dynamic[gt_static_mask] = 0
-            lpips_dynamic = self.eval_lpips(
-                torch.reshape(result["rgb_dynamic_all"], (test_H, test_W, 3)),
-                torch.reshape(rgb_gt_dynamic, (test_H, test_W, 3)),
-            )
-            rgb_gt_static = batch["target"][i].clone()
-            rgb_gt_static[gt_dynamic_mask] = 0
-            rgb_pred_static = result["rgb"].clone()
-            rgb_pred_static[gt_dynamic_mask] = 0
-            lpips_static = self.eval_lpips(
-                torch.reshape(rgb_pred_static, (test_H, test_W, 3)),
-                torch.reshape(rgb_gt_static, (test_H, test_W, 3)),
-            )
-
-            ssim, ssim_img = self.eval_ssim(
+            ssim = self.eval_ssim(
                 torch.reshape(result["rgb"], (test_H, test_W, 3)),
                 torch.reshape(batch["target"][i], (test_H, test_W, 3)),
-                return_full_image=True,
             )
-            ssim_dynamic = ssim_img[0, :].reshape(3, -1)[:, gt_dynamic_mask].mean()
-            ssim_static = ssim_img[0, :].reshape(3, -1)[:, gt_static_mask].mean()
 
             self.test_mse_mean += mse
             self.test_psnr_mean += psnr
-            self.test_dynamic_psnr_mean += psnr_dynamic
-            self.test_static_psnr_mean += psnr_static
-
             self.test_lpips_mean += lpips
-            self.test_static_lpips_mean += lpips_static
-            self.test_dynamic_lpips_mean += lpips_dynamic
-
             self.test_ssim_mean += ssim
-            self.test_dynamic_ssim_mean += ssim_dynamic
-            self.test_static_ssim_mean += ssim_static
 
             test_result = test_step_for_one_frame(
                 self.test_dataset,
@@ -779,15 +656,6 @@ class StarOnline(pl.LightningModule):
                     batch["cam_pose"],
                 )
 
-            depth_rgb_vals = visualize_depth_with_values(
-                test_result["depth_dynamics"],
-                test_result["normed_depth_dynamics"],
-            )
-            depth_rgb_vals0 = visualize_depth_with_values(
-                test_result["depth_dynamic0s"],
-                test_result["normed_depth_dynamic0s"],
-            )
-
             self.logger.log_image(
                 "test/imgs",
                 [
@@ -797,44 +665,13 @@ class StarOnline(pl.LightningModule):
                     test_result["rgb_static"],
                     test_result["depth"],
                     *test_result["depth_dynamics"],
-                    *depth_rgb_vals,
                     test_result["depth_static"],
                     test_result["rgb0"],
                     *test_result["rgb_dynamic0s"],
                     test_result["rgb_static0"],
                     test_result["depth0"],
                     *test_result["depth_dynamic0s"],
-                    *depth_rgb_vals0,
                     test_result["depth_static0"],
-                    to8b(
-                        rgb_gt_static.reshape((test_H, test_W, 3))
-                        .cpu()
-                        .detach()
-                        .numpy(),
-                        "rgb_gt_static",
-                    ),
-                    to8b(
-                        rgb_pred_static.reshape((test_H, test_W, 3))
-                        .cpu()
-                        .detach()
-                        .numpy(),
-                        "rgb_pred_static",
-                    ),
-                    to8b(
-                        rgb_gt_dynamic.reshape((test_H, test_W, 3))
-                        .cpu()
-                        .detach()
-                        .numpy(),
-                        "rgb_gt_dynamic",
-                    ),
-                    to8b(
-                        result["rgb_dynamic_all"]
-                        .reshape((test_H, test_W, 3))
-                        .cpu()
-                        .detach()
-                        .numpy(),
-                        "rgb_dynamic_all",
-                    ),
                 ],
             )
 
@@ -851,21 +688,6 @@ class StarOnline(pl.LightningModule):
         )  # num_vehicles, num_frames, H, W, 3
 
     def on_test_start(self):
-        # print("extracting static mesh")
-        # extract_mesh(self.star_network.static_fine_nerf, "static_fine")
-        # print("extracting dynamic mesh 0")
-        # extract_mesh(self.star_network.dynamic_fine_nerfs[0], "dynamic_fine0")
-        # print("extracting dynamic mesh 1")
-        # extract_mesh(self.star_network.dynamic_fine_nerfs[1], "dynamic_fine1")
-
-        save_poses_to_file(
-            self.poses,
-            self.train_dataset.gt_relative_poses_matrices,
-            self.args.eval_last_frame,
-            f"poses/{self.logger.version}"
-        )
-        raise NotImplementedError("Test end not implemented")
-
         self.video_basepath = os.path.join("videos", self.logger.version)
         self.test_rgb_gts = []
         self.test_rgbs = []
@@ -879,61 +701,36 @@ class StarOnline(pl.LightningModule):
         self.test_psnr_mean = 0
         self.test_lpips_mean = 0
         self.test_ssim_mean = 0
-
-        self.test_dynamic_psnr_mean = 0
-        self.test_static_psnr_mean = 0
-        self.test_dynamic_lpips_mean = 0
-        self.test_static_lpips_mean = 0
-        self.test_dynamic_ssim_mean = 0
-        self.test_static_ssim_mean = 0
-
         self.test_iou3d = np.zeros(self.args.num_vehicles)
         self.test_iou2d = 0
         self.test_iou2d_count = 0
 
     def on_test_end(self):
-        eval_len = self.test_dataset.imgs.shape[0] * self.args.eval_last_frame
-        self.test_mse_mean /= eval_len
-        self.test_psnr_mean /= eval_len
-        self.test_lpips_mean /= eval_len
-        self.test_ssim_mean /= eval_len
+        self.test_mse_mean /= self.test_dataset.imgs.shape[0]
+        self.test_psnr_mean /= self.test_dataset.imgs.shape[0]
+        self.test_lpips_mean /= self.test_dataset.imgs.shape[0]
+        self.test_ssim_mean /= self.test_dataset.imgs.shape[0]
 
-        self.test_dynamic_psnr_mean /= eval_len
-        self.test_dynamic_lpips_mean /= eval_len
-        self.test_dynamic_ssim_mean /= eval_len
-
-        self.test_static_psnr_mean /= eval_len
-        self.test_static_lpips_mean /= eval_len
-        self.test_static_ssim_mean /= eval_len
-
-        print("test/mse", self.test_mse_mean)
-        print("test/psnr", self.test_psnr_mean)
-        print("test/lpips", self.test_lpips_mean)
-        print("test/ssim", self.test_ssim_mean)
-
-        print("test/dynamic_psnr", self.test_dynamic_psnr_mean)
-        print("test/dynamic_lpips", self.test_dynamic_lpips_mean)
-        print("test/dynamic_ssim", self.test_dynamic_ssim_mean)
-
-        print("test/static_psnr", self.test_static_psnr_mean)
-        print("test/static_lpips", self.test_static_lpips_mean)
-        print("test/static_ssim", self.test_static_ssim_mean)
+        self.log("test/mse", self.test_mse_mean)
+        self.log("test/psnr", self.test_psnr_mean)
+        self.log("test/lpips", self.test_lpips_mean)
+        self.log("test/ssim", self.test_ssim_mean)
 
         iou_2d = self.test_iou2d / self.test_iou2d_count
-        print("test/iou_2d", iou_2d)
+        self.log("test/iou_2d", iou_2d)
 
         if self.args.has_bbox:
             iou_3d = self.test_iou3d / (
                 self.args.eval_last_frame - 1
             )  # -1, since for the first frame we use gt pose
-            print("test/iou_3d", iou_3d)
+            self.log("test/iou_3d", iou_3d)
 
-        return  # TODO move below to another file/func
+        return  # TODO delete
         fps = 10
         quality = 8
 
         # Creating video only for this view
-        view = 0  # TODO determine this
+        view = 0
 
         self.test_rgb_gts = np.stack(self.test_rgb_gts, 0)
         self.test_rgbs = np.stack(self.test_rgbs, 0)
@@ -1053,9 +850,7 @@ class StarOnline(pl.LightningModule):
                 print("total rot errors", rot_error)
 
         # Init SSIM metric
-        self.val_ssim = StructuralSimilarityIndexMeasure(
-            data_range=1.0, return_full_image=True
-        )
+        self.val_ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
         # Init LPIPS metric
         self.val_lpips = LearnedPerceptualImagePatchSimilarity("vgg", normalize=True)
         for p in self.val_lpips.net.parameters():
@@ -1103,18 +898,14 @@ class StarOnline(pl.LightningModule):
         self.val_lpips.reset()
         return lpips
 
-    def eval_ssim(self, pred_img, gt_img, return_full_image=False):
+    def eval_ssim(self, pred_img, gt_img):
         # Rearrange for torchmetrics library
         pred_img_rearranged = rearrange(pred_img[None, ...], "B H W C -> B C H W")
         gt_img_rearranged = rearrange(gt_img[None, ...], "B H W C -> B C H W")
 
         self.val_ssim(pred_img_rearranged, gt_img_rearranged)
-        ssim, ssim_img = self.val_ssim.compute()
+        ssim = self.val_ssim.compute()
         self.val_ssim.reset()
-
-        if return_full_image:
-            return ssim, ssim_img
-
         return ssim
 
 
@@ -1168,7 +959,7 @@ def train(args, model):
         accumulate_grad_batches=args.accumulate_grad_batches,
         reload_dataloaders_every_n_epochs=1,
         gradient_clip_val=1.0,
-        # detect_anomaly=True,
+        detect_anomaly=True,
         # profiler="simple",
     )
 
@@ -1180,7 +971,7 @@ def test(args, model: pl.LightningModule):
         args.online_ckpt_path, strict=False, args=args, star_network=model.star_network
     )"""
 
-    logger = WandbLogger(project=args.expname, offline=False)
+    logger = WandbLogger(project=args.expname)
     logger.watch(model, log="all")
     logger.experiment.config.update(args)
     logger.experiment.log_code(root=args.code_dir)

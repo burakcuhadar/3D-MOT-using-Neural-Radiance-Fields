@@ -1,0 +1,58 @@
+test=True
+expname = nerf_time_test
+code_dir = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields
+basedir = ./logs
+
+# datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_chevro_tesla4
+# num_frames = 12
+# eval_last_frame = 8
+# num_vehicles = 2
+
+datadir = /home/stud/cuhadar/storage/user/Generate-Data-IDP/carla_with_test_poses
+num_frames = 16
+eval_last_frame = 9
+num_vehicles = 1
+
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/nerftime/g4aw0a2i/epoch=239.ckpt
+# online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/nerftime/g4aw0a2i/epoch=159.ckpt
+online_ckpt_path = /home/stud/cuhadar/storage/user/star_trans_only_lightning/3D-MOT-using-Neural-Radiance-Fields/sbatch/ckpts/nerftime/kl92vh6l/epoch=79.ckpt
+
+has_depth_data = True
+
+car_sample_ratio = 0
+
+far_dist = 1e10
+
+accumulate_grad_batches = 1
+
+lrate = 5e-4
+lrate_decay_steps = [80]
+lrate_decay_rate = 0.5
+
+
+netdepth = 8
+netdepth_fine = 8
+netwidth = 256
+netwidth_fine = 256
+
+chunk = 8192
+netchunk = 16384
+
+scale_factor = 0.01
+
+N_samples = 256
+N_importance = 256
+
+N_rand = 1400
+mixed_precision = False
+
+num_workers = 4
+
+epochs_online = 10000
+epoch_val = 10
+
+end_barf = -1
+
+use_viewdirs = True
+
+precrop_iters = -1
